@@ -33,7 +33,7 @@ ETH_HOST="0.0.0.0"
 # Eth node rpc port
 ETH_RPC_PORT="8545"
 
-ETH_CONTRACT_ADDRESS=0x8497452388c710Ebecd09adBF018C41f1Fe69876
+ETH_CONTRACT_ADDRESS=0x1DAb6aE0402769D18a263f12eD8703372F33989D
 
 # ------------------ Run gravity ------------------
 
@@ -98,6 +98,6 @@ echo "Starting orchestrator"
 gbt orchestrator --cosmos-phrase="$GRAVITY_ORCHESTRATOR_MNEMONIC" \
              --ethereum-key="$ETH_ORCHESTRATOR_PRIVATE_KEY" \
              --cosmos-grpc="http://$GRAVITY_HOST:$GRAVITY_GRPC_PORT/" \
-             --ethereum-rpc="http://$ETH_HOST:$ETH_RPC_PORT/" \
+             --ethereum-rpc="$ETH_ADDRESS" \
              --fees="1$STAKE_DENOM" \
              --gravity-contract-address="$ETH_CONTRACT_ADDRESS"
