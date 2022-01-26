@@ -11,7 +11,7 @@ import (
 	"github.com/althea-net/cosmos-gravity-bridge/module/x/gravity/types"
 )
 
-const OutgoingTxBatchSize = 5
+const OutgoingTxBatchSize = 10
 
 // BuildOutgoingTXBatch starts the following process chain:
 // - find bridged denominator for given voucher type
