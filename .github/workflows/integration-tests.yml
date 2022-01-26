@@ -2,7 +2,7 @@ name: Integration tests
 
 on:
   push:
-    branches: [master, main]
+    branches: [master, main, dzmitryhil/upgrade-gravity-contract]
   pull_request:
     branches: [master, main]
 
