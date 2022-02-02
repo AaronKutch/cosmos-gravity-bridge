@@ -234,7 +234,6 @@ func ParamKeyTable() paramtypes.KeyTable {
 			Denom:  "",
 			Amount: sdk.Int{},
 		},
-		Erc20ToDenomPermanentSwap: ERC20ToDenom{},
 	})
 }
 

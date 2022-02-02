@@ -1009,8 +1009,7 @@ func (m *Params) Size() (n int) {
 			n += 2 + l + sovGenesis(uint64(l))
 		}
 	}
-	l = m.Erc20ToDenomPermanentSwap.Size()
-	n += 2 + l + sovGenesis(uint64(l))
+	n += 2 + sovGenesis(uint64(l))
 	return n
 }
 

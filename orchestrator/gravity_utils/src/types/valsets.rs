@@ -126,7 +126,9 @@ impl Valset {
         signatures: &[T],
     ) -> Result<SignatureStatus, GravityError> {
         if signatures.is_empty() {
-            return Err(GravityError::ValidationError("No signatures!".into()));
+            return Err(GravityError::InsufficientVotingPowerToPass(
+                "No signatures!".into(),
+            ));
         }
 
         let mut out = Vec::new();
@@ -208,7 +210,7 @@ impl Valset {
                 TOTAL_GRAVITY_POWER,
                 gravity_power_to_percent(status.power_of_nonvoters),
             );
-            Err(GravityError::ValidationError(message))
+            Err(GravityError::InsufficientVotingPowerToPass(message))
         } else {
             Ok(status.ordered_signatures)
         }
