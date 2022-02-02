@@ -3,8 +3,8 @@ package app
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"math/rand"
+	"os"
 	"time"
 
 	"github.com/tendermint/tendermint/libs/log"
@@ -52,7 +52,7 @@ func SetupSimulation(dirPrefix, dbName string) (simtypes.Config, dbm.DB, string,
 		logger = log.NewNopLogger()
 	}
 
-	dir, err := ioutil.TempDir("", dirPrefix)
+	dir, err := os.MkdirTemp("", dirPrefix)
 	if err != nil {
 		return simtypes.Config{}, nil, "", nil, false, err
 	}
@@ -67,7 +67,7 @@ func SetupSimulation(dirPrefix, dbName string) (simtypes.Config, dbm.DB, string,
 
 // SimulationOperations retrieves the simulation params from the provided file path
 // and returns all the modules weighted operations
-func SimulationOperations(app Gravity, cdc codec.JSONMarshaler, config simtypes.Config) []simtypes.WeightedOperation {
+func SimulationOperations(app Gravity, cdc codec.JSONCodec, config simtypes.Config) []simtypes.WeightedOperation {
 	simState := module.SimulationState{
 		AppParams:    make(simtypes.AppParams),
 		Cdc:          cdc,
@@ -83,7 +83,7 @@ func SimulationOperations(app Gravity, cdc codec.JSONMarshaler, config simtypes.
 	}
 
 	if config.ParamsFile != "" {
-		bz, err := ioutil.ReadFile(config.ParamsFile)
+		bz, err := os.ReadFile(config.ParamsFile)
 		if err != nil {
 			panic(err)
 		}
@@ -111,7 +111,7 @@ func CheckExportSimulation(
 			return err
 		}
 
-		if err := ioutil.WriteFile(config.ExportStatePath, []byte(exported.AppState), 0600); err != nil {
+		if err := os.WriteFile(config.ExportStatePath, []byte(exported.AppState), 0600); err != nil {
 			return err
 		}
 	}
@@ -123,7 +123,7 @@ func CheckExportSimulation(
 			return err
 		}
 
-		if err := ioutil.WriteFile(config.ExportParamsPath, paramsBz, 0600); err != nil {
+		if err := os.WriteFile(config.ExportParamsPath, paramsBz, 0600); err != nil {
 			return err
 		}
 	}

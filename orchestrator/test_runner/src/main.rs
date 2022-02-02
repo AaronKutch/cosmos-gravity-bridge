@@ -6,16 +6,21 @@
 #[macro_use]
 extern crate log;
 
+use crate::airdrop_proposal::airdrop_proposal_test;
 use crate::bootstrapping::*;
+use crate::deposit_overflow::deposit_overflow_test;
+use crate::ethereum_blacklist_test::ethereum_blacklist_test;
+use crate::ibc_metadata::ibc_metadata_proposal_test;
 use crate::invalid_events::invalid_events;
+use crate::pause_bridge::pause_bridge_test;
+use crate::signature_slashing::signature_slashing_test;
+use crate::slashing_delegation::slashing_delegation_test;
 use crate::tx_cancel::send_to_eth_and_cancel;
 use crate::utils::*;
 use crate::valset_rewards::valset_rewards_test;
 use clarity::PrivateKey as EthPrivateKey;
 use clarity::{Address as EthAddress, Uint256};
-use cosmos_gravity::utils::wait_for_cosmos_online;
 use deep_space::coin::Coin;
-use deep_space::Address as CosmosAddress;
 use deep_space::Contact;
 use evidence_based_slashing::evidence_based_slashing;
 use gravity_proto::gravity::query_client::QueryClient as GravityQueryClient;
@@ -29,13 +34,20 @@ use transaction_stress_test::transaction_stress_test;
 use unhalt_bridge::unhalt_bridge_test;
 use valset_stress::validator_set_stress_test;
 
+mod airdrop_proposal;
 mod bootstrapping;
+mod deposit_overflow;
+mod ethereum_blacklist_test;
 mod evidence_based_slashing;
 mod happy_path;
 mod happy_path_v2;
+mod ibc_metadata;
 mod invalid_events;
 mod orch_keys;
+mod pause_bridge;
 mod relay_market;
+mod signature_slashing;
+mod slashing_delegation;
 mod transaction_stress_test;
 mod tx_cancel;
 mod unhalt_bridge;
@@ -51,7 +63,7 @@ const TOTAL_TIMEOUT: Duration = Duration::from_secs(600);
 // Retrieve values from runtime ENV vars
 lazy_static! {
     static ref ADDRESS_PREFIX: String =
-        env::var("ADDRESS_PREFIX").unwrap_or_else(|_| CosmosAddress::DEFAULT_PREFIX.to_owned());
+        env::var("ADDRESS_PREFIX").unwrap_or_else(|_| "gravity".to_string());
     static ref STAKING_TOKEN: String =
         env::var("STAKING_TOKEN").unwrap_or_else(|_| "stake".to_owned());
     static ref COSMOS_NODE_GRPC: String =
@@ -88,6 +100,13 @@ pub fn get_fee() -> Coin {
     Coin {
         denom: get_test_token_name(),
         amount: 1u32.into(),
+    }
+}
+
+pub fn get_deposit() -> Coin {
+    Coin {
+        denom: STAKING_TOKEN.to_string(),
+        amount: 1_000_000_000u64.into(),
     }
 }
 
@@ -151,16 +170,17 @@ pub async fn main() {
     // for things
     send_eth_to_orchestrators(&keys, &web30).await;
 
-    assert!(check_cosmos_balance(
-        &get_test_token_name(),
-        keys[0]
-            .validator_key
-            .to_address(&contact.get_prefix())
-            .unwrap(),
-        &contact
-    )
-    .await
-    .is_some());
+    assert!(contact
+        .get_balance(
+            keys[0]
+                .validator_key
+                .to_address(&contact.get_prefix())
+                .unwrap(),
+            get_test_token_name(),
+        )
+        .await
+        .unwrap()
+        .is_some());
 
     // This segment contains optional tests, by default we run a happy path test
     // this tests all major functionality of Gravity once or twice.
@@ -209,7 +229,7 @@ pub async fn main() {
             return;
         } else if test_type == "VALSET_REWARDS" {
             info!("Starting Valset rewards test");
-            valset_rewards_test(&web30, grpc_client, &contact, keys, gravity_address, false).await;
+            valset_rewards_test(&web30, grpc_client, &contact, keys, gravity_address).await;
             return;
         } else if test_type == "V2_HAPPY_PATH" || test_type == "HAPPY_PATH_V2" {
             info!("Starting happy path for Gravity v2");
@@ -228,7 +248,7 @@ pub async fn main() {
             evidence_based_slashing(&web30, &contact, keys, gravity_address).await;
             return;
         } else if test_type == "TXCANCEL" {
-            info!("SendToEth cancellation test!");
+            info!("Starting SendToEth cancellation test!");
             send_to_eth_and_cancel(
                 &contact,
                 grpc_client,
@@ -240,7 +260,7 @@ pub async fn main() {
             .await;
             return;
         } else if test_type == "INVALID_EVENTS" {
-            info!("Invalid events test!");
+            info!("Starting invalid events test!");
             invalid_events(
                 &web30,
                 &contact,
@@ -260,10 +280,47 @@ pub async fn main() {
                 keys,
                 gravity_address,
                 erc20_addresses[0],
-                false,
             )
             .await;
             return;
+        } else if test_type == "PAUSE_BRIDGE" {
+            info!("Starting pause bridge tests");
+            pause_bridge_test(
+                &web30,
+                grpc_client,
+                &contact,
+                keys,
+                gravity_address,
+                erc20_addresses[0],
+            )
+            .await;
+            return;
+        } else if test_type == "DEPOSIT_OVERFLOW" {
+            info!("Starting deposit overflow test!");
+            deposit_overflow_test(&web30, &contact, keys, erc20_addresses, grpc_client).await;
+            return;
+        } else if test_type == "ETHEREUM_BLACKLIST" {
+            info!("Starting ethereum blacklist test");
+            ethereum_blacklist_test(grpc_client, &contact, keys).await;
+            return;
+        } else if test_type == "AIRDROP_PROPOSAL" {
+            info!("Starting airdrop governance proposal test");
+            airdrop_proposal_test(&contact, keys).await;
+            return;
+        } else if test_type == "SIGNATURE_SLASHING" {
+            info!("Starting Signature Slashing test");
+            signature_slashing_test(&web30, grpc_client, &contact, keys, gravity_address).await;
+            return;
+        } else if test_type == "SLASHING_DELEGATION" {
+            info!("Starting Slashing Delegation test");
+            slashing_delegation_test(&web30, grpc_client, &contact, keys, gravity_address).await;
+            return;
+        } else if test_type == "IBC_METADATA" {
+            info!("Starting IBC metadata proposal test");
+            ibc_metadata_proposal_test(gravity_address, keys, grpc_client, &contact, &web30).await;
+            return;
+        } else if !test_type.is_empty() {
+            panic!("Err Unknown test type")
         }
     }
     info!("Starting Happy path test");

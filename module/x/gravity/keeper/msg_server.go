@@ -8,10 +8,9 @@ import (
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
-	paramstypes "github.com/cosmos/cosmos-sdk/x/params/types"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
-	"github.com/althea-net/cosmos-gravity-bridge/module/x/gravity/types"
+	"github.com/Gravity-Bridge/Gravity-Bridge/module/x/gravity/types"
 )
 
 type msgServer struct {
@@ -24,30 +23,24 @@ func NewMsgServerImpl(keeper Keeper) types.MsgServer {
 	return &msgServer{Keeper: keeper}
 }
 
-var _ types.MsgServer = msgServer{
-	Keeper: Keeper{
-		StakingKeeper:      nil,
-		storeKey:           nil,
-		paramSpace:         paramstypes.Subspace{},
-		cdc:                nil,
-		bankKeeper:         nil,
-		SlashingKeeper:     nil,
-		AttestationHandler: nil,
-	},
-}
-
 func (k msgServer) SetOrchestratorAddress(c context.Context, msg *types.MsgSetOrchestratorAddress) (*types.MsgSetOrchestratorAddressResponse, error) {
 	// ensure that this passes validation, checks the key validity
 	err := msg.ValidateBasic()
 	if err != nil {
-		return nil, err
+		return nil, sdkerrors.Wrap(err, "Key not valid")
 	}
 
 	ctx := sdk.UnwrapSDKContext(c)
-	val, _ := sdk.ValAddressFromBech32(msg.Validator)
-	orch, _ := sdk.AccAddressFromBech32(msg.Orchestrator)
-	addr, _ := types.NewEthAddress(msg.EthAddress)
 
+	// check the following, all should be validated in validate basic
+	val, e1 := sdk.ValAddressFromBech32(msg.Validator)
+	orch, e2 := sdk.AccAddressFromBech32(msg.Orchestrator)
+	addr, e3 := types.NewEthAddress(msg.EthAddress)
+	if e1 != nil || e2 != nil || e3 != nil {
+		return nil, sdkerrors.Wrap(err, "Key not valid")
+	}
+
+	// check that the validator does not have an existing key
 	_, foundExistingOrchestratorKey := k.GetOrchestratorValidator(ctx, orch)
 	_, foundExistingEthAddress := k.GetEthAddressByValidator(ctx, val)
 
@@ -56,6 +49,17 @@ func (k msgServer) SetOrchestratorAddress(c context.Context, msg *types.MsgSetOr
 		return nil, sdkerrors.Wrap(stakingtypes.ErrNoValidatorFound, val.String())
 	} else if foundExistingOrchestratorKey || foundExistingEthAddress {
 		return nil, sdkerrors.Wrap(types.ErrResetDelegateKeys, val.String())
+	}
+
+	// check that neither key is a duplicate
+	delegateKeys := k.GetDelegateKeys(ctx)
+	for i := range delegateKeys {
+		if delegateKeys[i].EthAddress == addr.GetAddress() {
+			return nil, sdkerrors.Wrap(err, "Duplicate Ethereum Key")
+		}
+		if delegateKeys[i].Orchestrator == orch.String() {
+			return nil, sdkerrors.Wrap(err, "Duplicate Orchestrator Key")
+		}
 	}
 
 	// set the orchestrator address
@@ -85,8 +89,11 @@ func (k msgServer) ValsetConfirm(c context.Context, msg *types.MsgValsetConfirm)
 
 	gravityID := k.GetGravityID(ctx)
 	checkpoint := valset.GetCheckpoint(gravityID)
-	orchaddr, _ := sdk.AccAddressFromBech32(msg.Orchestrator)
-	err := k.confirmHandlerCommon(ctx, msg.Orchestrator, msg.Signature, checkpoint)
+	orchaddr, err := sdk.AccAddressFromBech32(msg.Orchestrator)
+	if err != nil {
+		return nil, sdkerrors.Wrap(types.ErrInvalid, "acc address invalid")
+	}
+	err = k.confirmHandlerCommon(ctx, msg.EthAddress, msg.Orchestrator, msg.Signature, checkpoint)
 	if err != nil {
 		return nil, err
 	}
@@ -119,9 +126,18 @@ func (k msgServer) SendToEth(c context.Context, msg *types.MsgSendToEth) (*types
 	if err != nil {
 		return nil, sdkerrors.Wrap(err, "invalid eth dest")
 	}
+	_, erc20, err := k.DenomToERC20Lookup(ctx, msg.Amount.Denom)
+	if err != nil {
+		return nil, sdkerrors.Wrap(err, "invalid denom")
+	}
+
+	if k.InvalidSendToEthAddress(ctx, *dest, *erc20) {
+		return nil, sdkerrors.Wrap(err, "destination address is invalid or blacklisted")
+	}
+
 	txID, err := k.AddToOutgoingPool(ctx, sender, *dest, msg.Amount, msg.BridgeFee)
 	if err != nil {
-		return nil, err
+		return nil, sdkerrors.Wrap(err, "Could not add to outgoing pool")
 	}
 
 	ctx.EventManager().EmitEvent(
@@ -143,12 +159,12 @@ func (k msgServer) RequestBatch(c context.Context, msg *types.MsgRequestBatch) (
 	// If not, error out
 	_, tokenContract, err := k.DenomToERC20Lookup(ctx, msg.Denom)
 	if err != nil {
-		return nil, err
+		return nil, sdkerrors.Wrap(err, "Could not look up erc 20 denominator")
 	}
 
 	batch, err := k.BuildOutgoingTXBatch(ctx, *tokenContract, OutgoingTxBatchSize)
 	if err != nil {
-		return nil, err
+		return nil, sdkerrors.Wrap(err, "Could not build outgoing tx batch")
 	}
 
 	ctx.EventManager().EmitEvent(
@@ -168,7 +184,10 @@ func (k msgServer) ConfirmBatch(c context.Context, msg *types.MsgConfirmBatch) (
 	if err != nil {
 		return nil, sdkerrors.Wrap(err, "invalid MsgConfirmBatch")
 	}
-	contract, _ := types.NewEthAddress(msg.TokenContract)
+	contract, err := types.NewEthAddress(msg.TokenContract)
+	if err != nil {
+		return nil, sdkerrors.Wrap(types.ErrInvalid, "eth address invalid")
+	}
 	ctx := sdk.UnwrapSDKContext(c)
 
 	// fetch the outgoing batch given the nonce
@@ -180,7 +199,7 @@ func (k msgServer) ConfirmBatch(c context.Context, msg *types.MsgConfirmBatch) (
 	gravityID := k.GetGravityID(ctx)
 	checkpoint := batch.GetCheckpoint(gravityID)
 	orchaddr, _ := sdk.AccAddressFromBech32(msg.Orchestrator)
-	err = k.confirmHandlerCommon(ctx, msg.Orchestrator, msg.Signature, checkpoint)
+	err = k.confirmHandlerCommon(ctx, msg.EthSigner, msg.Orchestrator, msg.Signature, checkpoint)
 	if err != nil {
 		return nil, err
 	}
@@ -218,8 +237,11 @@ func (k msgServer) ConfirmLogicCall(c context.Context, msg *types.MsgConfirmLogi
 
 	gravityID := k.GetGravityID(ctx)
 	checkpoint := logic.GetCheckpoint(gravityID)
-	orchaddr, _ := sdk.AccAddressFromBech32(msg.Orchestrator)
-	err = k.confirmHandlerCommon(ctx, msg.Orchestrator, msg.Signature, checkpoint)
+	orchaddr, err := sdk.AccAddressFromBech32(msg.Orchestrator)
+	if err != nil {
+		return nil, sdkerrors.Wrap(types.ErrInvalid, "acc address invalid")
+	}
+	err = k.confirmHandlerCommon(ctx, msg.EthSigner, msg.Orchestrator, msg.Signature, checkpoint)
 	if err != nil {
 		return nil, err
 	}
@@ -244,7 +266,10 @@ func (k msgServer) ConfirmLogicCall(c context.Context, msg *types.MsgConfirmLogi
 // checkOrchestratorValidatorInSet checks that the orchestrator refers to a validator that is
 // currently in the set
 func (k msgServer) checkOrchestratorValidatorInSet(ctx sdk.Context, orchestrator string) error {
-	orchaddr, _ := sdk.AccAddressFromBech32(orchestrator)
+	orchaddr, err := sdk.AccAddressFromBech32(orchestrator)
+	if err != nil {
+		return sdkerrors.Wrap(types.ErrInvalid, "acc address invalid")
+	}
 	validator, found := k.GetOrchestratorValidator(ctx, orchaddr)
 	if !found {
 		return sdkerrors.Wrap(types.ErrUnknown, "validator")
@@ -286,24 +311,39 @@ func (k msgServer) claimHandlerCommon(ctx sdk.Context, msgAny *codectypes.Any, m
 }
 
 // confirmHandlerCommon is an internal function that provides common code for processing claim messages
-func (k msgServer) confirmHandlerCommon(ctx sdk.Context, orchestrator string, signature string, checkpoint []byte) error {
+func (k msgServer) confirmHandlerCommon(ctx sdk.Context, ethAddress string, orchestrator string, signature string, checkpoint []byte) error {
 	sigBytes, err := hex.DecodeString(signature)
 	if err != nil {
 		return sdkerrors.Wrap(types.ErrInvalid, "signature decoding")
 	}
 
-	orchaddr, _ := sdk.AccAddressFromBech32(orchestrator)
+	submittedEthAddress, err := types.NewEthAddress(ethAddress)
+	if err != nil {
+		return sdkerrors.Wrap(types.ErrInvalid, "invalid eth address")
+	}
+
+	orchaddr, err := sdk.AccAddressFromBech32(orchestrator)
+	if err != nil {
+		return sdkerrors.Wrap(types.ErrInvalid, "acc address invalid")
+	}
 	validator, found := k.GetOrchestratorValidator(ctx, orchaddr)
 	if !found {
 		return sdkerrors.Wrap(types.ErrUnknown, "validator")
 	}
-
-	ethAddress, found := k.GetEthAddressByValidator(ctx, validator.GetOperator())
-	if !found {
-		return sdkerrors.Wrap(types.ErrEmpty, "eth address")
+	if err := sdk.VerifyAddressFormat(validator.GetOperator()); err != nil {
+		return sdkerrors.Wrapf(err, "discovered invalid validator address for orchestrator %v", orchaddr)
 	}
 
-	err = types.ValidateEthereumSignature(checkpoint, sigBytes, *ethAddress)
+	ethAddressFromStore, found := k.GetEthAddressByValidator(ctx, validator.GetOperator())
+	if !found {
+		return sdkerrors.Wrap(types.ErrEmpty, "no eth address set for validator")
+	}
+
+	if *ethAddressFromStore != *submittedEthAddress {
+		return sdkerrors.Wrap(types.ErrInvalid, "submitted eth address does not match delegate eth address")
+	}
+
+	err = types.ValidateEthereumSignature(checkpoint, sigBytes, *ethAddressFromStore)
 	if err != nil {
 		return sdkerrors.Wrap(types.ErrInvalid, fmt.Sprintf("signature verification failed expected sig by %s with checkpoint %s found %s", ethAddress, hex.EncodeToString(checkpoint), signature))
 	}
@@ -320,11 +360,11 @@ func (k msgServer) SendToCosmosClaim(c context.Context, msg *types.MsgSendToCosm
 
 	err := k.checkOrchestratorValidatorInSet(ctx, msg.Orchestrator)
 	if err != nil {
-		return nil, err
+		return nil, sdkerrors.Wrap(err, "Could not check orchstrator validator inset")
 	}
 	any, err := codectypes.NewAnyWithValue(msg)
 	if err != nil {
-		return nil, err
+		return nil, sdkerrors.Wrap(err, "Could not check Any value")
 	}
 	err = k.claimHandlerCommon(ctx, any, msg)
 	if err != nil {
@@ -343,11 +383,11 @@ func (k msgServer) BatchSendToEthClaim(c context.Context, msg *types.MsgBatchSen
 
 	err := k.checkOrchestratorValidatorInSet(ctx, msg.Orchestrator)
 	if err != nil {
-		return nil, err
+		return nil, sdkerrors.Wrap(err, "Could not check orchestrator validator")
 	}
 	any, err := codectypes.NewAnyWithValue(msg)
 	if err != nil {
-		return nil, err
+		return nil, sdkerrors.Wrap(err, "Could not check Any value")
 	}
 	err = k.claimHandlerCommon(ctx, any, msg)
 	if err != nil {
@@ -363,11 +403,11 @@ func (k msgServer) ERC20DeployedClaim(c context.Context, msg *types.MsgERC20Depl
 
 	err := k.checkOrchestratorValidatorInSet(ctx, msg.Orchestrator)
 	if err != nil {
-		return nil, err
+		return nil, sdkerrors.Wrap(err, "Could not check orchestrator validator in set")
 	}
 	any, err := codectypes.NewAnyWithValue(msg)
 	if err != nil {
-		return nil, err
+		return nil, sdkerrors.Wrap(err, "Could not check Any value")
 	}
 	err = k.claimHandlerCommon(ctx, any, msg)
 	if err != nil {
@@ -383,11 +423,11 @@ func (k msgServer) LogicCallExecutedClaim(c context.Context, msg *types.MsgLogic
 
 	err := k.checkOrchestratorValidatorInSet(ctx, msg.Orchestrator)
 	if err != nil {
-		return nil, err
+		return nil, sdkerrors.Wrap(err, "Could not check orchestrator validator in set")
 	}
 	any, err := codectypes.NewAnyWithValue(msg)
 	if err != nil {
-		return nil, err
+		return nil, sdkerrors.Wrap(err, "Could not check Any value")
 	}
 	err = k.claimHandlerCommon(ctx, any, msg)
 	if err != nil {
@@ -403,11 +443,11 @@ func (k msgServer) ValsetUpdateClaim(c context.Context, msg *types.MsgValsetUpda
 
 	err := k.checkOrchestratorValidatorInSet(ctx, msg.Orchestrator)
 	if err != nil {
-		return nil, err
+		return nil, sdkerrors.Wrap(err, "Could not check orchestrator validator in set")
 	}
 	any, err := codectypes.NewAnyWithValue(msg)
 	if err != nil {
-		return nil, err
+		return nil, sdkerrors.Wrap(err, "Could not check Any value")
 	}
 	err = k.claimHandlerCommon(ctx, any, msg)
 	if err != nil {

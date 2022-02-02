@@ -6,12 +6,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
+
+	crypto "github.com/cosmos/cosmos-sdk/crypto/types"
 
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
@@ -19,7 +20,7 @@ import (
 	tmos "github.com/tendermint/tendermint/libs/os"
 	tmtypes "github.com/tendermint/tendermint/types"
 
-	gravitytypes "github.com/althea-net/cosmos-gravity-bridge/module/x/gravity/types"
+	gravitytypes "github.com/Gravity-Bridge/Gravity-Bridge/module/x/gravity/types"
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/client/flags"
 	"github.com/cosmos/cosmos-sdk/client/tx"
@@ -70,11 +71,15 @@ $ %s gentx my-key-name 1000000stake 0x033030FEeBd93E3178487c35A9c8cA80874353C9 c
 			if err != nil {
 				return err
 			}
-			cdc := clientCtx.JSONMarshaler
+			cdc := clientCtx.Codec
 
 			config := serverCtx.Config
-			config.SetRoot(clientCtx.HomeDir)
-
+			homeFlag, _ := cmd.Flags().GetString(flags.FlagHome)
+			if len(homeFlag) > 0 {
+				config = config.SetRoot(homeFlag)
+			} else {
+				config = config.SetRoot(clientCtx.HomeDir)
+			}
 			nodeID, valPubKey, err := genutil.InitializeNodeValidatorFiles(serverCtx.Config)
 			if err != nil {
 				return errors.Wrap(err, "failed to initialize node validator files")
@@ -87,7 +92,8 @@ $ %s gentx my-key-name 1000000stake 0x033030FEeBd93E3178487c35A9c8cA80874353C9 c
 
 			// read --pubkey, if empty take it from priv_validator.json
 			if valPubKeyString, _ := cmd.Flags().GetString(cli.FlagPubKey); valPubKeyString != "" {
-				valPubKey, err = sdk.GetPubKeyFromBech32(sdk.Bech32PubKeyTypeConsPub, valPubKeyString)
+				var valPubKey crypto.PubKey
+				err := clientCtx.Codec.UnmarshalInterfaceJSON([]byte(valPubKeyString), &valPubKey)
 				if err != nil {
 					return errors.Wrap(err, "failed to get consensus node public key")
 				}
@@ -248,7 +254,7 @@ func makeOutputFilepath(rootDir, nodeID string) (string, error) {
 }
 
 func readUnsignedGenTxFile(clientCtx client.Context, r io.Reader) (sdk.Tx, error) {
-	bz, err := ioutil.ReadAll(r)
+	bz, err := io.ReadAll(r)
 	if err != nil {
 		return nil, err
 	}
@@ -291,9 +297,14 @@ func CollectGenTxsCmd(genBalIterator types.GenesisBalancesIterator, defaultNodeH
 			config := serverCtx.Config
 
 			clientCtx := client.GetClientContextFromCmd(cmd)
-			cdc := clientCtx.JSONMarshaler
+			cdc := clientCtx.Codec
 
-			config.SetRoot(clientCtx.HomeDir)
+			homeFlag, _ := cmd.Flags().GetString(flags.FlagHome)
+			if len(homeFlag) > 0 {
+				config = config.SetRoot(homeFlag)
+			} else {
+				config = config.SetRoot(clientCtx.HomeDir)
+			}
 
 			nodeID, valPubKey, err := genutil.InitializeNodeValidatorFiles(config)
 			if err != nil {
@@ -363,7 +374,7 @@ func newPrintInfo(moniker, chainID, nodeID, genTxsDir string, appMessage json.Ra
 }
 
 // GenAppStateFromConfig gets the genesis app state from the config
-func GenAppStateFromConfig(cdc codec.JSONMarshaler, txEncodingConfig client.TxEncodingConfig,
+func GenAppStateFromConfig(cdc codec.Codec, txEncodingConfig client.TxEncodingConfig,
 	config *cfg.Config, initCfg types.InitConfig, genDoc tmtypes.GenesisDoc, genBalIterator types.GenesisBalancesIterator,
 ) (appState json.RawMessage, err error) {
 
@@ -407,7 +418,7 @@ func GenAppStateFromConfig(cdc codec.JSONMarshaler, txEncodingConfig client.TxEn
 
 // CollectTxs processes and validates application's genesis Txs and returns
 // the list of appGenTxs, and persistent peers required to generate genesis.json.
-func CollectTxs(cdc codec.JSONMarshaler, txJSONDecoder sdk.TxDecoder, moniker, genTxsDir string,
+func CollectTxs(cdc codec.Codec, txJSONDecoder sdk.TxDecoder, moniker, genTxsDir string,
 	genDoc tmtypes.GenesisDoc, genBalIterator types.GenesisBalancesIterator,
 ) (appGenTxs []sdk.Tx, persistentPeers string, err error) {
 	// prepare a map of all balances in genesis state to then validate
@@ -417,8 +428,8 @@ func CollectTxs(cdc codec.JSONMarshaler, txJSONDecoder sdk.TxDecoder, moniker, g
 		return appGenTxs, persistentPeers, err
 	}
 
-	var fos []os.FileInfo
-	fos, err = ioutil.ReadDir(genTxsDir)
+	var fos []os.DirEntry
+	fos, err = os.ReadDir(genTxsDir)
 	if err != nil {
 		return appGenTxs, persistentPeers, err
 	}
@@ -445,7 +456,7 @@ func CollectTxs(cdc codec.JSONMarshaler, txJSONDecoder sdk.TxDecoder, moniker, g
 		}
 
 		// get the genTx
-		jsonRawTx, err := ioutil.ReadFile(filepath.Join(genTxsDir, fo.Name()))
+		jsonRawTx, err := os.ReadFile(filepath.Join(genTxsDir, fo.Name()))
 		if err != nil {
 			return appGenTxs, persistentPeers, err
 		}

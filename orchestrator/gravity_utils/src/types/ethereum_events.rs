@@ -198,7 +198,13 @@ impl ValsetUpdatedEvent {
         let valset_nonce: u64 = valset_nonce.to_string().parse().unwrap();
 
         let block_height = if let Some(bn) = input.block_number.clone() {
-            bn
+            if bn > u64::MAX.into() {
+                return Err(GravityError::InvalidEventLogError(
+                    "Event nonce overflow! probably incorrect parsing".to_string(),
+                ));
+            } else {
+                bn
+            }
         } else {
             return Err(GravityError::ValidationError(
                 "Log does not have block number, we only search logs already in blocks?"
@@ -265,7 +271,13 @@ impl TransactionBatchExecutedEvent {
             let erc20 = EthAddress::from_slice(&erc20_data[12..32])?;
             let event_nonce = Uint256::from_bytes_be(&input.data);
             let block_height = if let Some(bn) = input.block_number.clone() {
-                bn
+                if bn > u64::MAX.into() {
+                    return Err(GravityError::InvalidEventLogError(
+                        "Block height overflow! probably incorrect parsing".to_string(),
+                    ));
+                } else {
+                    bn
+                }
             } else {
                 return Err(GravityError::ValidationError(
                     "Log does not have block number, we only search logs already in blocks?"
@@ -357,7 +369,13 @@ impl SendToCosmosEvent {
             let erc20 = EthAddress::from_slice(&erc20_data[12..32])?;
             let sender = EthAddress::from_slice(&sender_data[12..32])?;
             let block_height = if let Some(bn) = input.block_number.clone() {
-                bn
+                if bn > u64::MAX.into() {
+                    return Err(GravityError::InvalidEventLogError(
+                        "Block height overflow! probably incorrect parsing".to_string(),
+                    ));
+                } else {
+                    bn
+                }
             } else {
                 return Err(GravityError::ValidationError(
                     "Log does not have block number, we only search logs already in blocks?"
@@ -525,7 +543,13 @@ impl Erc20DeployedEvent {
             let erc20 = EthAddress::from_slice(&new_token_contract_data[12..32])?;
 
             let block_height = if let Some(bn) = input.block_number.clone() {
-                bn
+                if bn > u64::MAX.into() {
+                    return Err(GravityError::InvalidEventLogError(
+                        "Event nonce overflow! probably incorrect parsing".to_string(),
+                    ));
+                } else {
+                    bn
+                }
             } else {
                 return Err(GravityError::ValidationError(
                     "Log does not have block number, we only search logs already in blocks?"
@@ -884,13 +908,13 @@ mod tests {
         let event = "0x0000000000000000000000000000000000000000000000000000000000000060\
         0000000000000000000000000000000000000000000000000000000000000064\
         0000000000000000000000000000000000000000000000000000000000000002\
-        000000000000000000000000000000000000000000000000000000000000002d\
-        636f736d6f733139347a613679766737646a7a33633676716c63787a7877636a\
-        6b617a3972647173326567397000000000000000000000000000000000000000";
+        000000000000000000000000000000000000000000000000000000000000002f\
+        67726176697479313139347a613679766737646a7a33633676716c63787a7877\
+        636a6b617a397264717332656739700000000000000000000000000000000000";
         let event_bytes = hex_str_to_bytes(event).unwrap();
 
         let correct = SendToCosmosEventData {
-            destination: "cosmos194za6yvg7djz3c6vqlcxzxwcjkaz9rdqs2eg9p".to_string(),
+            destination: "gravity1194za6yvg7djz3c6vqlcxzxwcjkaz9rdqs2eg9p".to_string(),
             amount: 100u8.into(),
             event_nonce: 2u8.into(),
         };

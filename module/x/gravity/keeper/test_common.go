@@ -56,7 +56,7 @@ import (
 	tmversion "github.com/tendermint/tendermint/proto/tendermint/version"
 	dbm "github.com/tendermint/tm-db"
 
-	"github.com/althea-net/cosmos-gravity-bridge/module/x/gravity/types"
+	"github.com/Gravity-Bridge/Gravity-Bridge/module/x/gravity/types"
 )
 
 var (
@@ -79,12 +79,6 @@ var (
 		evidence.AppModuleBasic{},
 		vesting.AppModuleBasic{},
 	)
-
-	// Ensure that StakingKeeperMock implements required interface
-	_ types.StakingKeeper = &StakingKeeperMock{
-		BondedValidators: []stakingtypes.Validator{},
-		ValidatorPower:   map[string]int64{},
-	}
 )
 
 var (
@@ -142,6 +136,33 @@ var (
 		sdk.ValAddress(AccPubKeys[4].Address()),
 	}
 
+	// AccPubKeys holds the pub keys for the account keys
+	OrchPubKeys = []ccrypto.PubKey{
+		OrchPrivKeys[0].PubKey(),
+		OrchPrivKeys[1].PubKey(),
+		OrchPrivKeys[2].PubKey(),
+		OrchPrivKeys[3].PubKey(),
+		OrchPrivKeys[4].PubKey(),
+	}
+
+	// Orchestrator private keys
+	OrchPrivKeys = []ccrypto.PrivKey{
+		secp256k1.GenPrivKey(),
+		secp256k1.GenPrivKey(),
+		secp256k1.GenPrivKey(),
+		secp256k1.GenPrivKey(),
+		secp256k1.GenPrivKey(),
+	}
+
+	// AccAddrs holds the sdk.AccAddresses
+	OrchAddrs = []sdk.AccAddress{
+		sdk.AccAddress(OrchPubKeys[0].Address()),
+		sdk.AccAddress(OrchPubKeys[1].Address()),
+		sdk.AccAddress(OrchPubKeys[2].Address()),
+		sdk.AccAddress(OrchPubKeys[3].Address()),
+		sdk.AccAddress(OrchPubKeys[4].Address()),
+	}
+
 	// TODO: generate the eth priv keys here and
 	// derive the address from them.
 
@@ -164,13 +185,13 @@ var (
 	}
 
 	// InitTokens holds the number of tokens to initialize an account with
-	InitTokens = sdk.TokensFromConsensusPower(110)
+	InitTokens = sdk.TokensFromConsensusPower(110, sdk.DefaultPowerReduction)
 
 	// InitCoins holds the number of coins to initialize an account with
 	InitCoins = sdk.NewCoins(sdk.NewCoin(TestingStakeParams.BondDenom, InitTokens))
 
 	// StakingAmount holds the staking power to start a validator with
-	StakingAmount = sdk.TokensFromConsensusPower(10)
+	StakingAmount = sdk.TokensFromConsensusPower(10, sdk.DefaultPowerReduction)
 
 	// StakingCoins holds the staking coins to start a validator with
 	StakingCoins = sdk.NewCoins(sdk.NewCoin(TestingStakeParams.BondDenom, StakingAmount))
@@ -202,6 +223,7 @@ var (
 		UnbondSlashingValsetsWindow:  15,
 		SlashFractionBadEthSignature: sdk.NewDecWithPrec(1, 2),
 		ValsetReward:                 sdk.Coin{Denom: "", Amount: sdk.ZeroInt()},
+		BridgeActive:                 true,
 	}
 )
 
@@ -215,7 +237,7 @@ type TestInput struct {
 	BankKeeper     bankkeeper.BaseKeeper
 	GovKeeper      govkeeper.Keeper
 	Context        sdk.Context
-	Marshaler      codec.Marshaler
+	Marshaler      codec.Codec
 	LegacyAmino    *codec.LegacyAmino
 }
 
@@ -238,7 +260,8 @@ func SetupFiveValChain(t *testing.T) (TestInput, sdk.Context) {
 		)
 
 		// Set the balance for the account
-		input.BankKeeper.SetBalances(input.Context, acc.GetAddress(), InitCoins)
+		require.NoError(t, input.BankKeeper.MintCoins(input.Context, types.ModuleName, InitCoins))
+		input.BankKeeper.SendCoinsFromModuleToAccount(input.Context, types.ModuleName, acc.GetAddress(), InitCoins)
 
 		// Set the account in state
 		input.AccountKeeper.SetAccount(input.Context, acc)
@@ -257,14 +280,90 @@ func SetupFiveValChain(t *testing.T) (TestInput, sdk.Context) {
 	// Run the staking endblocker to ensure valset is correct in state
 	staking.EndBlocker(input.Context, input.StakingKeeper)
 
-	// Register eth addresses for each validator
+	// Register eth addresses and orchestrator address for each validator
 	for i, addr := range ValAddrs {
 		ethAddr, err := types.NewEthAddress(EthAddrs[i].String())
 		if err != nil {
 			panic("found invalid address in EthAddrs")
 		}
 		input.GravityKeeper.SetEthAddressForValidator(input.Context, addr, *ethAddr)
+
+		input.GravityKeeper.SetOrchestratorValidator(input.Context, addr, OrchAddrs[i])
 	}
+
+	// Return the test input
+	return input, input.Context
+}
+
+// SetupTestChain sets up a test environment with the provided validator voting weights
+func SetupTestChain(t *testing.T, weights []uint64, setDelegateAddresses bool) (TestInput, sdk.Context) {
+	t.Helper()
+	input := CreateTestEnv(t)
+
+	// Set the params for our modules
+	TestingStakeParams.MaxValidators = 100
+	input.StakingKeeper.SetParams(input.Context, TestingStakeParams)
+
+	// Initialize each of the validators
+	sh := staking.NewHandler(input.StakingKeeper)
+	for i, weight := range weights {
+		consPrivKey := ed25519.GenPrivKey()
+		consPubKey := consPrivKey.PubKey()
+		valPrivKey := secp256k1.GenPrivKey()
+		valPubKey := valPrivKey.PubKey()
+		valAddr := sdk.ValAddress(valPubKey.Address())
+		accAddr := sdk.AccAddress(valPubKey.Address())
+
+		// Initialize the account for the key
+		acc := input.AccountKeeper.NewAccount(
+			input.Context,
+			authtypes.NewBaseAccount(accAddr, valPubKey, uint64(i), 0),
+		)
+
+		// Set the balance for the account
+		weightCoins := sdk.NewCoins(sdk.NewInt64Coin(TestingStakeParams.BondDenom, int64(weight)))
+		require.NoError(t, input.BankKeeper.MintCoins(input.Context, types.ModuleName, weightCoins))
+		require.NoError(t, input.BankKeeper.SendCoinsFromModuleToAccount(input.Context, types.ModuleName, accAddr, weightCoins))
+
+		// Set the account in state
+		input.AccountKeeper.SetAccount(input.Context, acc)
+
+		// Create a validator for that account using some of the tokens in the account
+		// and the staking handler
+		_, err := sh(
+			input.Context,
+			NewTestMsgCreateValidator(valAddr, consPubKey, sdk.NewIntFromUint64(weight)),
+		)
+		require.NoError(t, err)
+
+		// Run the staking endblocker to ensure valset is correct in state
+		staking.EndBlocker(input.Context, input.StakingKeeper)
+
+		if setDelegateAddresses {
+			// set the delegate addresses for this key
+			ethAddr, err := types.NewEthAddress(gethcommon.BytesToAddress(bytes.Repeat([]byte{byte(i)}, 20)).String())
+			if err != nil {
+				panic("found invalid address in EthAddrs")
+			}
+			input.GravityKeeper.SetEthAddressForValidator(input.Context, valAddr, *ethAddr)
+			input.GravityKeeper.SetOrchestratorValidator(input.Context, valAddr, accAddr)
+
+			// increase block height by 100 blocks
+			input.Context = input.Context.WithBlockHeight(input.Context.BlockHeight() + 100)
+
+			// Run the staking endblocker to ensure valset is correct in state
+			staking.EndBlocker(input.Context, input.StakingKeeper)
+
+			// set a request every time.
+			input.GravityKeeper.SetValsetRequest(input.Context)
+		}
+
+	}
+
+	// some inputs can cause the validator creation ot not work, this checks that
+	// everything was successful
+	validators := input.StakingKeeper.GetBondedValidatorsByPower(input.Context)
+	require.Equal(t, len(weights), len(validators))
 
 	// Return the test input
 	return input, input.Context
@@ -384,17 +483,21 @@ func CreateTestEnv(t *testing.T) TestInput {
 
 	// total supply to track this
 	totalSupply := sdk.NewCoins(sdk.NewInt64Coin("stake", 100000000))
-	bankKeeper.SetSupply(ctx, banktypes.NewSupply(totalSupply))
 
 	// set up initial accounts
 	for name, perms := range maccPerms {
 		mod := authtypes.NewEmptyModuleAccount(name, perms...)
 		if name == stakingtypes.NotBondedPoolName {
-			err = bankKeeper.SetBalances(ctx, mod.GetAddress(), totalSupply)
+			err = bankKeeper.MintCoins(ctx, types.ModuleName, totalSupply)
+			require.NoError(t, err)
+			err = bankKeeper.SendCoinsFromModuleToModule(ctx, types.ModuleName, mod.Name, totalSupply)
 			require.NoError(t, err)
 		} else if name == distrtypes.ModuleName {
 			// some big pot to pay out
-			err = bankKeeper.SetBalances(ctx, mod.GetAddress(), sdk.NewCoins(sdk.NewInt64Coin("stake", 500000)))
+			amt := sdk.NewCoins(sdk.NewInt64Coin("stake", 500000))
+			err = bankKeeper.MintCoins(ctx, types.ModuleName, amt)
+			require.NoError(t, err)
+			err = bankKeeper.SendCoinsFromModuleToModule(ctx, types.ModuleName, mod.Name, amt)
 			require.NoError(t, err)
 		}
 		accountKeeper.SetModuleAccount(ctx, mod)
@@ -437,7 +540,7 @@ func CreateTestEnv(t *testing.T) TestInput {
 		getSubspace(paramsKeeper, slashingtypes.ModuleName).WithKeyTable(slashingtypes.ParamKeyTable()),
 	)
 
-	k := NewKeeper(marshaler, gravityKey, getSubspace(paramsKeeper, types.DefaultParamspace), stakingKeeper, bankKeeper, distKeeper, slashingKeeper)
+	k := NewKeeper(gravityKey, getSubspace(paramsKeeper, types.DefaultParamspace), marshaler, &bankKeeper, &stakingKeeper, &slashingKeeper, &distKeeper, &accountKeeper)
 
 	stakingKeeper = *stakingKeeper.SetHooks(
 		stakingtypes.NewMultiStakingHooks(
@@ -446,6 +549,15 @@ func CreateTestEnv(t *testing.T) TestInput {
 			k.Hooks(),
 		),
 	)
+
+	// set gravityIDs for batches and tx items, simulating genesis setup
+	k.SetLatestValsetNonce(ctx, 0)
+	k.setLastObservedEventNonce(ctx, 0)
+	k.SetLastSlashedValsetNonce(ctx, 0)
+	k.SetLastSlashedBatchBlock(ctx, 0)
+	k.SetLastSlashedLogicCallBlock(ctx, 0)
+	k.setID(ctx, 0, []byte(types.KeyLastTXPoolID))
+	k.setID(ctx, 0, []byte(types.KeyLastOutgoingBatchID))
 
 	k.SetParams(ctx, TestingGravityParams)
 	params := k.GetParams(ctx)
@@ -487,7 +599,7 @@ func MakeTestCodec() *codec.LegacyAmino {
 }
 
 // MakeTestMarshaler creates a proto codec for use in testing
-func MakeTestMarshaler() codec.Marshaler {
+func MakeTestMarshaler() codec.Codec {
 	interfaceRegistry := codectypes.NewInterfaceRegistry()
 	std.RegisterInterfaces(interfaceRegistry)
 	ModuleBasics.RegisterInterfaces(interfaceRegistry)
@@ -504,292 +616,6 @@ func MintVouchersFromAir(t *testing.T, ctx sdk.Context, k Keeper, dest sdk.AccAd
 	err = k.bankKeeper.SendCoinsFromModuleToAccount(ctx, types.ModuleName, dest, vouchers)
 	require.NoError(t, err)
 	return coin
-}
-
-// NewStakingKeeperMock creates a new mock staking keeper
-func NewStakingKeeperMock(operators ...sdk.ValAddress) *StakingKeeperMock {
-	r := &StakingKeeperMock{
-		BondedValidators: make([]stakingtypes.Validator, 0),
-		ValidatorPower:   make(map[string]int64),
-	}
-	const defaultTestPower = 100
-	for _, a := range operators {
-		r.BondedValidators = append(r.BondedValidators, stakingtypes.Validator{
-			OperatorAddress: a.String(),
-			ConsensusPubkey: &codectypes.Any{
-				TypeUrl:              "",
-				Value:                []byte{},
-				XXX_NoUnkeyedLiteral: struct{}{},
-				XXX_unrecognized:     []byte{},
-				XXX_sizecache:        0,
-			},
-			Jailed:          false,
-			Status:          stakingtypes.Bonded,
-			Tokens:          InitTokens,
-			DelegatorShares: sdk.Dec{},
-			Description: stakingtypes.Description{
-				Moniker:         "",
-				Identity:        "",
-				Website:         "",
-				SecurityContact: "",
-				Details:         "",
-			},
-			UnbondingHeight: 0,
-			UnbondingTime:   time.Time{},
-			Commission: stakingtypes.Commission{
-				CommissionRates: stakingtypes.CommissionRates{
-					Rate:          sdk.Dec{},
-					MaxRate:       sdk.Dec{},
-					MaxChangeRate: sdk.Dec{},
-				},
-				UpdateTime: time.Time{},
-			},
-			MinSelfDelegation: sdk.Int{},
-		})
-		r.ValidatorPower[a.String()] = defaultTestPower
-	}
-	return r
-}
-
-// MockStakingValidatorData creates mock validator data
-type MockStakingValidatorData struct {
-	Operator sdk.ValAddress
-	Power    int64
-}
-
-// NewStakingKeeperWeightedMock creates a new mock staking keeper with some mock validator data
-func NewStakingKeeperWeightedMock(t ...MockStakingValidatorData) *StakingKeeperMock {
-	r := &StakingKeeperMock{
-		BondedValidators: make([]stakingtypes.Validator, len(t)),
-		ValidatorPower:   make(map[string]int64, len(t)),
-	}
-
-	for i, a := range t {
-		r.BondedValidators[i] = stakingtypes.Validator{
-			OperatorAddress: a.Operator.String(),
-			ConsensusPubkey: &codectypes.Any{
-				TypeUrl:              "",
-				Value:                []byte{},
-				XXX_NoUnkeyedLiteral: struct{}{},
-				XXX_unrecognized:     []byte{},
-				XXX_sizecache:        0,
-			},
-			Jailed:          false,
-			Status:          stakingtypes.Bonded,
-			Tokens:          InitTokens,
-			DelegatorShares: sdk.Dec{},
-			Description: stakingtypes.Description{
-				Moniker:         "",
-				Identity:        "",
-				Website:         "",
-				SecurityContact: "",
-				Details:         "",
-			},
-			UnbondingHeight: 0,
-			UnbondingTime:   time.Time{},
-			Commission: stakingtypes.Commission{
-				CommissionRates: stakingtypes.CommissionRates{
-					Rate:          sdk.Dec{},
-					MaxRate:       sdk.Dec{},
-					MaxChangeRate: sdk.Dec{},
-				},
-				UpdateTime: time.Time{},
-			},
-			MinSelfDelegation: sdk.Int{},
-		}
-		r.ValidatorPower[a.Operator.String()] = a.Power
-	}
-	return r
-}
-
-// StakingKeeperMock is a mock staking keeper for use in the tests
-type StakingKeeperMock struct {
-	BondedValidators []stakingtypes.Validator
-	ValidatorPower   map[string]int64
-}
-
-// GetBondedValidatorsByPower implements the interface for staking keeper required by gravity
-func (s *StakingKeeperMock) GetBondedValidatorsByPower(ctx sdk.Context) []stakingtypes.Validator {
-	return s.BondedValidators
-}
-
-// GetLastValidatorPower implements the interface for staking keeper required by gravity
-func (s *StakingKeeperMock) GetLastValidatorPower(ctx sdk.Context, operator sdk.ValAddress) int64 {
-	v, ok := s.ValidatorPower[operator.String()]
-	if !ok {
-		panic("unknown address")
-	}
-	return v
-}
-
-// GetLastTotalPower implements the interface for staking keeper required by gravity
-func (s *StakingKeeperMock) GetLastTotalPower(ctx sdk.Context) (power sdk.Int) {
-	var total int64
-	for _, v := range s.ValidatorPower {
-		total += v
-	}
-	return sdk.NewInt(total)
-}
-
-// IterateValidators staisfies the interface
-func (s *StakingKeeperMock) IterateValidators(ctx sdk.Context, cb func(index int64, validator stakingtypes.ValidatorI) (stop bool)) {
-	for i, val := range s.BondedValidators {
-		stop := cb(int64(i), val)
-		if stop {
-			break
-		}
-	}
-}
-
-// IterateBondedValidatorsByPower staisfies the interface
-func (s *StakingKeeperMock) IterateBondedValidatorsByPower(ctx sdk.Context, cb func(index int64, validator stakingtypes.ValidatorI) (stop bool)) {
-	for i, val := range s.BondedValidators {
-		stop := cb(int64(i), val)
-		if stop {
-			break
-		}
-	}
-}
-
-// IterateLastValidators staisfies the interface
-func (s *StakingKeeperMock) IterateLastValidators(ctx sdk.Context, cb func(index int64, validator stakingtypes.ValidatorI) (stop bool)) {
-	for i, val := range s.BondedValidators {
-		stop := cb(int64(i), val)
-		if stop {
-			break
-		}
-	}
-}
-
-// Validator satisfies the interface
-func (s *StakingKeeperMock) Validator(ctx sdk.Context, addr sdk.ValAddress) stakingtypes.ValidatorI {
-	for _, val := range s.BondedValidators {
-		if val.GetOperator().Equals(addr) {
-			return val
-		}
-	}
-	return nil
-}
-
-// ValidatorByConsAddr staisfies the interface
-func (s *StakingKeeperMock) ValidatorByConsAddr(ctx sdk.Context, addr sdk.ConsAddress) stakingtypes.ValidatorI {
-	for _, val := range s.BondedValidators {
-		cons, err := val.GetConsAddr()
-		if err != nil {
-			panic(err)
-		}
-		if cons.Equals(addr) {
-			return val
-		}
-	}
-	return nil
-}
-
-func (s *StakingKeeperMock) GetParams(ctx sdk.Context) stakingtypes.Params {
-	panic("unexpected call")
-}
-
-func (s *StakingKeeperMock) GetValidator(ctx sdk.Context, addr sdk.ValAddress) (validator stakingtypes.Validator, found bool) {
-	for _, val := range s.BondedValidators {
-		if val.GetOperator().Equals(addr) {
-			return val, true
-		}
-	}
-	return stakingtypes.Validator{
-		OperatorAddress: "",
-		ConsensusPubkey: &codectypes.Any{
-			TypeUrl:              "",
-			Value:                []byte{},
-			XXX_NoUnkeyedLiteral: struct{}{},
-			XXX_unrecognized:     []byte{},
-			XXX_sizecache:        0,
-		},
-		Jailed:          false,
-		Status:          0,
-		Tokens:          InitTokens,
-		DelegatorShares: sdk.Dec{},
-		Description: stakingtypes.Description{
-			Moniker:         "",
-			Identity:        "",
-			Website:         "",
-			SecurityContact: "",
-			Details:         "",
-		},
-		UnbondingHeight: 0,
-		UnbondingTime:   time.Time{},
-		Commission: stakingtypes.Commission{
-			CommissionRates: stakingtypes.CommissionRates{
-				Rate:          sdk.Dec{},
-				MaxRate:       sdk.Dec{},
-				MaxChangeRate: sdk.Dec{},
-			},
-			UpdateTime: time.Time{},
-		},
-		MinSelfDelegation: sdk.Int{},
-	}, false
-}
-
-func (s *StakingKeeperMock) ValidatorQueueIterator(ctx sdk.Context, endTime time.Time, endHeight int64) sdk.Iterator {
-	panic("unexpected call")
-}
-
-// Slash staisfies the interface
-func (s *StakingKeeperMock) Slash(sdk.Context, sdk.ConsAddress, int64, int64, sdk.Dec) {}
-
-// Jail staisfies the interface
-func (s *StakingKeeperMock) Jail(sdk.Context, sdk.ConsAddress) {}
-
-// AlwaysPanicStakingMock is a mock staking keeper that panics on usage
-type AlwaysPanicStakingMock struct{}
-
-// GetLastTotalPower implements the interface for staking keeper required by gravity
-func (s AlwaysPanicStakingMock) GetLastTotalPower(ctx sdk.Context) (power sdk.Int) {
-	panic("unexpected call")
-}
-
-// GetBondedValidatorsByPower implements the interface for staking keeper required by gravity
-func (s AlwaysPanicStakingMock) GetBondedValidatorsByPower(ctx sdk.Context) []stakingtypes.Validator {
-	panic("unexpected call")
-}
-
-// GetLastValidatorPower implements the interface for staking keeper required by gravity
-func (s AlwaysPanicStakingMock) GetLastValidatorPower(ctx sdk.Context, operator sdk.ValAddress) int64 {
-	panic("unexpected call")
-}
-
-// IterateValidators staisfies the interface
-func (s AlwaysPanicStakingMock) IterateValidators(sdk.Context, func(index int64, validator stakingtypes.ValidatorI) (stop bool)) {
-	panic("unexpected call")
-}
-
-// IterateBondedValidatorsByPower staisfies the interface
-func (s AlwaysPanicStakingMock) IterateBondedValidatorsByPower(sdk.Context, func(index int64, validator stakingtypes.ValidatorI) (stop bool)) {
-	panic("unexpected call")
-}
-
-// IterateLastValidators staisfies the interface
-func (s AlwaysPanicStakingMock) IterateLastValidators(sdk.Context, func(index int64, validator stakingtypes.ValidatorI) (stop bool)) {
-	panic("unexpected call")
-}
-
-// Validator staisfies the interface
-func (s AlwaysPanicStakingMock) Validator(sdk.Context, sdk.ValAddress) stakingtypes.ValidatorI {
-	panic("unexpected call")
-}
-
-// ValidatorByConsAddr staisfies the interface
-func (s AlwaysPanicStakingMock) ValidatorByConsAddr(sdk.Context, sdk.ConsAddress) stakingtypes.ValidatorI {
-	panic("unexpected call")
-}
-
-// Slash staisfies the interface
-func (s AlwaysPanicStakingMock) Slash(sdk.Context, sdk.ConsAddress, int64, int64, sdk.Dec) {
-	panic("unexpected call")
-}
-
-// Jail staisfies the interface
-func (s AlwaysPanicStakingMock) Jail(sdk.Context, sdk.ConsAddress) {
-	panic("unexpected call")
 }
 
 func NewTestMsgCreateValidator(address sdk.ValAddress, pubKey ccrypto.PubKey, amt sdk.Int) *stakingtypes.MsgCreateValidator {

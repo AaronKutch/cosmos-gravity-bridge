@@ -6,10 +6,11 @@ import (
 	"testing"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	gethcommon "github.com/ethereum/go-ethereum/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/althea-net/cosmos-gravity-bridge/module/x/gravity/types"
+	"github.com/Gravity-Bridge/Gravity-Bridge/module/x/gravity/types"
 )
 
 //nolint: exhaustivestruct
@@ -46,40 +47,53 @@ func TestPrefixRange(t *testing.T) {
 	}
 }
 
+// Test that valset creation produces the expected normalized power values
 //nolint: exhaustivestruct
 func TestCurrentValsetNormalization(t *testing.T) {
+	// Setup the overflow test
+	maxPower64 := make([]uint64, 64)             // users with max power (approx 2^63)
+	expPower64 := make([]uint64, 64)             // expected scaled powers
+	ethAddrs64 := make([]gethcommon.Address, 64) // need 64 eth addresses for this test
+	for i := 0; i < 64; i++ {
+		maxPower64[i] = uint64(9223372036854775807)
+		expPower64[i] = 67108864 // 2^32 split amongst 64 validators
+		ethAddrs64[i] = gethcommon.BytesToAddress(bytes.Repeat([]byte{byte(i)}, 20))
+	}
+
+	// any lower than this and a validator won't be created
+	const minStake = 1000000
+
 	specs := map[string]struct {
 		srcPowers []uint64
 		expPowers []uint64
 	}{
 		"one": {
-			srcPowers: []uint64{100},
+			srcPowers: []uint64{minStake},
 			expPowers: []uint64{4294967296},
 		},
 		"two": {
-			srcPowers: []uint64{99, 1},
+			srcPowers: []uint64{minStake * 99, minStake * 1},
 			expPowers: []uint64{4252017623, 42949672},
 		},
+		"four equal": {
+			srcPowers: []uint64{minStake, minStake, minStake, minStake},
+			expPowers: []uint64{1073741824, 1073741824, 1073741824, 1073741824},
+		},
+		"four equal max power": {
+			srcPowers: []uint64{4294967296, 4294967296, 4294967296, 4294967296},
+			expPowers: []uint64{1073741824, 1073741824, 1073741824, 1073741824},
+		},
+		"overflow": {
+			srcPowers: maxPower64,
+			expPowers: expPower64,
+		},
 	}
-	input := CreateTestEnv(t)
-	ctx := input.Context
 	for msg, spec := range specs {
 		spec := spec
 		t.Run(msg, func(t *testing.T) {
-			operators := make([]MockStakingValidatorData, len(spec.srcPowers))
-			for i, v := range spec.srcPowers {
-				cAddr := bytes.Repeat([]byte{byte(i)}, sdk.AddrLen)
-				operators[i] = MockStakingValidatorData{
-					// any unique addr
-					Operator: cAddr,
-					Power:    int64(v),
-				}
-				ethAddr, err := types.NewEthAddress(EthAddrs[i].String())
-				require.NoError(t, err)
-				input.GravityKeeper.SetEthAddressForValidator(ctx, cAddr, *ethAddr)
-			}
-			input.GravityKeeper.StakingKeeper = NewStakingKeeperWeightedMock(operators...)
-			r := input.GravityKeeper.GetCurrentValset(ctx)
+			input, ctx := SetupTestChain(t, spec.srcPowers, true)
+			r, err := input.GravityKeeper.GetCurrentValset(ctx)
+			require.NoError(t, err)
 			rMembers, err := types.BridgeValidators(r.Members).ToInternal()
 			require.NoError(t, err)
 			assert.Equal(t, spec.expPowers, rMembers.GetPowers())
@@ -144,12 +158,12 @@ func TestDelegateKeys(t *testing.T) {
 			"0x610277F0208D342C576b991daFdCb36E36515e76", "0x835973768750b3ED2D5c3EF5AdcD5eDb44d12aD4",
 			"0xb2A7F3E84F8FdcA1da46c810AEa110dd96BAE6bF"}
 
-		valAddrs = []string{"cosmosvaloper1jpz0ahls2chajf78nkqczdwwuqcu97w6z3plt4",
-			"cosmosvaloper15n79nty2fj37ant3p2gj4wju4ls6eu6tjwmdt0", "cosmosvaloper16dnkc6ac6ruuyr6l372fc3p77jgjpet6fka0cq",
-			"cosmosvaloper1vrptwhl3ht2txmzy28j9msqkcvmn8gjz507pgu"}
+		valAddrs = []string{"gravityvaloper1jpz0ahls2chajf78nkqczdwwuqcu97w6j77vg6",
+			"gravityvaloper15n79nty2fj37ant3p2gj4wju4ls6eu6tzpy7gq", "gravityvaloper16dnkc6ac6ruuyr6l372fc3p77jgjpet6eezum0",
+			"gravityvaloper1vrptwhl3ht2txmzy28j9msqkcvmn8gjzyqpjtn"}
 
-		orchAddrs = []string{"cosmos1g0etv93428tvxqftnmj25jn06mz6dtdasj5nz7", "cosmos1rhfs24tlw4na04v35tzmjncy785kkw9j27d5kx",
-			"cosmos10upq3tmt04zf55f6hw67m0uyrda3mp722q70rw", "cosmos1nt2uwjh5peg9vz2wfh2m3jjwqnu9kpjlhgpmen"}
+		orchAddrs = []string{"gravity1g0etv93428tvxqftnmj25jn06mz6dtda5zxt8k", "gravity1rhfs24tlw4na04v35tzmjncy785kkw9jwwlvnw",
+			"gravity10upq3tmt04zf55f6hw67m0uyrda3mp72wsvhxx", "gravity1nt2uwjh5peg9vz2wfh2m3jjwqnu9kpjlncnrum"}
 	)
 
 	for i := range ethAddrs {
@@ -181,13 +195,15 @@ func TestLastSlashedValsetNonce(t *testing.T) {
 	input, ctx := SetupFiveValChain(t)
 	k := input.GravityKeeper
 
-	vs := k.GetCurrentValset(ctx)
+	vs, err := k.GetCurrentValset(ctx)
+	require.NoError(t, err)
 
 	i := 1
 	for ; i < 10; i++ {
 		vs.Height = uint64(i)
 		vs.Nonce = uint64(i)
-		k.StoreValsetUnsafe(ctx, vs)
+		k.StoreValset(ctx, vs)
+		k.SetLatestValsetNonce(ctx, vs.Nonce)
 	}
 
 	latestValsetNonce := k.GetLatestValsetNonce(ctx)

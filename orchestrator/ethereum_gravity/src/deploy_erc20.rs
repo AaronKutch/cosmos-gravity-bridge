@@ -13,13 +13,13 @@ use web30::{client::Web3, types::SendTxOption};
 
 /// Calls the Gravity ethereum contract to deploy the ERC20 representation of the given Cosmos asset
 /// denom. If an existing contract is already deployed representing this asset this call will cost
-/// Gas but not actually do anything. Returns the new contract address or an error
+/// Gas but not actually do anything. Returns the txhash or an error
 #[allow(clippy::too_many_arguments)]
 pub async fn deploy_erc20(
     cosmos_denom: String,
     erc20_name: String,
     erc20_symbol: String,
-    decimals: u8,
+    decimals: u32,
     gravity_contract: Address,
     web3: &Web3,
     wait_timeout: Option<Duration>,

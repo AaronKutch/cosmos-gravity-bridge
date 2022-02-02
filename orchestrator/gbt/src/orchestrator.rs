@@ -1,6 +1,8 @@
 use crate::args::OrchestratorOpts;
 use crate::config::config_exists;
 use crate::config::load_keys;
+use crate::utils::print_relaying_explanation;
+use clarity::constants::ZERO_ADDRESS;
 use cosmos_gravity::query::get_gravity_params;
 use deep_space::PrivateKey as CosmosPrivateKey;
 use gravity_utils::connection_prep::{
@@ -8,11 +10,12 @@ use gravity_utils::connection_prep::{
 };
 use gravity_utils::connection_prep::{check_for_fee, create_rpc_connections};
 use gravity_utils::error::GravityError;
+use gravity_utils::types::BatchRequestMode;
 use gravity_utils::types::GravityBridgeToolsConfig;
+use metrics_exporter::metrics_server;
 use orchestrator::main_loop::{
     orchestrator_main_loop, ETH_ORACLE_LOOP_SPEED, ETH_SIGNER_LOOP_SPEED,
 };
-use relayer::main_loop::LOOP_SPEED as RELAYER_LOOP_SPEED;
 use std::cmp::min;
 use std::path::Path;
 use std::time::Duration;
@@ -28,9 +31,6 @@ pub async fn orchestrator(
     let ethereum_rpc = args.ethereum_rpc;
     let ethereum_key = args.ethereum_key;
     let cosmos_key = args.cosmos_phrase;
-    let wait_time = args
-        .wait_time
-        .map(|minutes| Duration::from_secs(minutes * 60));
 
     let cosmos_key = if let Some(k) = cosmos_key {
         k
@@ -43,12 +43,8 @@ pub async fn orchestrator(
             }
         }
         if k.is_none() {
-            error!("You must specify a Cosmos key phrase!");
-            error!("To generate, register, and store a key use `gbt keys register-orchestrator-address`");
-            error!("Store an already registered key using 'gbt keys set-orchestrator-key`");
-            error!("To run from the command line, with no key storage use 'gbt orchestrator --cosmos-phrase your phrase' ");
             return Err(GravityError::UnrecoverableError(
-                "Cosmos key phrase not specified".into(),
+                "You must specify an Orchestrator key phrase! To set an already registered key use 'gbt keys set-orchestrator-key --phrase \"your phrase\"`. To run from the command line, with no key storage use 'gbt orchestrator --cosmos-phrase \"your phrase\"'. If you have not already generated a key 'gbt keys register-orchestrator-address' will generate one for you".into(),
             ));
         }
         k.unwrap()
@@ -64,12 +60,8 @@ pub async fn orchestrator(
             }
         }
         if k.is_none() {
-            error!("You must specify an Ethereum key!");
-            error!("To generate, register, and store a key use `gbt keys register-orchestrator-address`");
-            error!("Store an already registered key using 'gbt keys set-ethereum-key`");
-            error!("To run from the command line, with no key storage use 'gbt orchestrator --ethereum-key your key' ");
             return Err(GravityError::UnrecoverableError(
-                "Ethereum key not specified".into(),
+                "You must specify an Orchestrator key phrase! To set an already registered key use 'gbt keys set-orchestrator-key --phrase \"your phrase\"`. To run from the command line, with no key storage use 'gbt orchestrator --cosmos-phrase \"your phrase\"'. If you have not already generated a key 'gbt keys register-orchestrator-address' will generate one for you".into(),
             ));
         }
         k.unwrap()
@@ -77,7 +69,7 @@ pub async fn orchestrator(
 
     let timeout = min(
         min(ETH_SIGNER_LOOP_SPEED, ETH_ORACLE_LOOP_SPEED),
-        RELAYER_LOOP_SPEED,
+        Duration::from_secs(config.relayer.relayer_loop_speed),
     );
 
     trace!("Probing RPC connections");
@@ -108,30 +100,64 @@ pub async fn orchestrator(
     wait_for_cosmos_node_ready(&contact).await;
 
     // check if the delegate addresses are correctly configured
-    check_delegate_addresses(
+    let res = check_delegate_addresses(
         &mut grpc,
         public_eth_key,
         public_cosmos_key,
         &contact.get_prefix(),
     )
-    .await?;
+    .await;
+    if res.is_err() {
+        // this applies to almost all errors coming from `check_delegate_addresses`
+        error!("If you are seeing the error that follows please read this documentation carefully https://github.com/Gravity-Bridge/Gravity-Docs/blob/main/docs/setting-up-a-validator.md#generate-your-delegate-keys");
+    }
+    res?;
 
     // check if we actually have the promised balance of tokens to pay fees
     check_for_fee(&fee, public_cosmos_key, &contact).await?;
     check_for_eth(public_eth_key, &web3).await?;
 
+    // get the gravity parameters
+    let params = get_gravity_params(&mut grpc)
+        .await
+        .expect("Failed to get Gravity Bridge module parameters!");
+
     // get the gravity contract address, if not provided
     let contract_address = if let Some(c) = args.gravity_contract_address {
         c
     } else {
-        let params = get_gravity_params(&mut grpc).await.unwrap();
         let c = params.bridge_ethereum_address.parse();
-        if c.is_err() {
-            return Err(GravityError::UnrecoverableError(
-                "The Gravity address is not yet set as a chain parameter! You must specify --gravity-contract-address".into(),
-            ));
+        match c {
+            Ok(v) => {
+                if v == *ZERO_ADDRESS {
+                    return Err(GravityError::UnrecoverableError(
+                        "The Gravity address is not yet set as a chain parameter! You must specify --gravity-contract-address".into(),
+                    ));
+                }
+                c.unwrap()
+            }
+            Err(_) => {
+                return Err(GravityError::UnrecoverableError(
+                    "The Gravity address is not yet set as a chain parameter! You must specify --gravity-contract-address".into(),
+                ));
+            }
         }
-        c.unwrap()
+    };
+
+    if config.orchestrator.relayer_enabled {
+        // setup and explain relayer settings
+        if config.relayer.batch_request_mode != BatchRequestMode::None {
+            let public_cosmos_key = cosmos_key.to_address(&contact.get_prefix()).unwrap();
+            check_for_fee(&fee, public_cosmos_key, &contact).await?;
+            print_relaying_explanation(&config.relayer, true)
+        } else {
+            print_relaying_explanation(&config.relayer, false)
+        }
+    }
+
+    // Start monitiring if enabled on config.toml
+    if config.metrics.metrics_enabled {
+        metrics_server(&config.metrics);
     };
 
     orchestrator_main_loop(
@@ -141,9 +167,10 @@ pub async fn orchestrator(
         connections.contact.unwrap(),
         connections.grpc.unwrap(),
         contract_address,
+        params.gravity_id,
         fee,
         config,
-        wait_time,
     )
-    .await
+    .await;
+    Ok(())
 }

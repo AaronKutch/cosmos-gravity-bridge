@@ -11,7 +11,7 @@ import (
 	hexUtil "github.com/ethereum/go-ethereum/common/hexutil"
 	ethCrypto "github.com/ethereum/go-ethereum/crypto"
 
-	"github.com/althea-net/cosmos-gravity-bridge/module/x/gravity/types"
+	"github.com/Gravity-Bridge/Gravity-Bridge/module/x/gravity/types"
 )
 
 type valsetConfirmReq struct {
@@ -50,7 +50,7 @@ func createValsetConfirmHandler(cliCtx client.Context, storeKey string) http.Han
 			return
 		}
 		var valset types.Valset
-		cliCtx.JSONMarshaler.MustUnmarshalJSON(res, &valset)
+		cliCtx.Codec.MustUnmarshalJSON(res, &valset)
 
 		// TODO: fix this, need to fetch the gravityID from params here
 		checkpoint := valset.GetCheckpoint("fetch-gravity-id-from-params-please-this-should-panic")

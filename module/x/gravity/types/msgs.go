@@ -334,8 +334,16 @@ func (msg *MsgSendToCosmosClaim) ValidateBasic() error {
 		return sdkerrors.Wrap(err, "erc20 token")
 	}
 	if _, err := sdk.AccAddressFromBech32(msg.Orchestrator); err != nil {
-		return sdkerrors.Wrap(sdkerrors.ErrInvalidAddress, msg.Orchestrator)
+		return sdkerrors.Wrap(sdkerrors.ErrInvalidAddress, "orchestrator")
 	}
+	// note the destination address is intentionally not validated here, since
+	// MsgSendToEth has it's destination as a string many invalid inputs are possible
+	// the orchestrator will convert these invalid deposits to simply the string invalid'
+	// this is done because the oracle requires an event be processed on Cosmos for each event
+	// nonce on the Ethereum side, otherwise (A) the oracle will never proceed and (B) the funds
+	// sent with the invalid deposit will forever be lost, with no representation minted anywhere
+	// on cosmos. The attestation handler deals with this by managing invalid deposits and placing
+	// them into the community pool
 	if msg.EventNonce == 0 {
 		return fmt.Errorf("nonce == 0")
 	}
@@ -651,7 +659,7 @@ func (b *MsgValsetUpdatedClaim) ClaimHash() ([]byte, error) {
 		return nil, sdkerrors.Wrap(err, "invalid members")
 	}
 	internalMembers.Sort()
-	path := fmt.Sprintf("%d/%d/%d/%s/%s/%s", b.EventNonce, b.ValsetNonce, b.BlockHeight, internalMembers.ToExternal(), b.RewardAmount.String(), b.RewardToken)
+	path := fmt.Sprintf("%d/%d/%d/%x/%s/%s", b.EventNonce, b.ValsetNonce, b.BlockHeight, internalMembers.ToExternal(), b.RewardAmount.String(), b.RewardToken)
 	return tmhash.Sum([]byte(path)), nil
 }
 

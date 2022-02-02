@@ -19,10 +19,10 @@ import (
 	bankkeeper "github.com/cosmos/cosmos-sdk/x/bank/keeper"
 	abci "github.com/tendermint/tendermint/abci/types"
 
-	"github.com/althea-net/cosmos-gravity-bridge/module/x/gravity/client/cli"
-	"github.com/althea-net/cosmos-gravity-bridge/module/x/gravity/client/rest"
-	"github.com/althea-net/cosmos-gravity-bridge/module/x/gravity/keeper"
-	"github.com/althea-net/cosmos-gravity-bridge/module/x/gravity/types"
+	"github.com/Gravity-Bridge/Gravity-Bridge/module/x/gravity/client/cli"
+	"github.com/Gravity-Bridge/Gravity-Bridge/module/x/gravity/client/rest"
+	"github.com/Gravity-Bridge/Gravity-Bridge/module/x/gravity/keeper"
+	"github.com/Gravity-Bridge/Gravity-Bridge/module/x/gravity/types"
 )
 
 // type check to ensure the interface is properly implemented
@@ -53,12 +53,12 @@ func (AppModuleBasic) RegisterLegacyAminoCodec(cdc *codec.LegacyAmino) {
 }
 
 // DefaultGenesis implements app module basic
-func (AppModuleBasic) DefaultGenesis(cdc codec.JSONMarshaler) json.RawMessage {
+func (AppModuleBasic) DefaultGenesis(cdc codec.JSONCodec) json.RawMessage {
 	return cdc.MustMarshalJSON(types.DefaultGenesisState())
 }
 
 // ValidateGenesis implements app module basic
-func (AppModuleBasic) ValidateGenesis(cdc codec.JSONMarshaler, _ client.TxEncodingConfig, bz json.RawMessage) error {
+func (AppModuleBasic) ValidateGenesis(cdc codec.JSONCodec, _ client.TxEncodingConfig, bz json.RawMessage) error {
 	var data types.GenesisState
 	if err := cdc.UnmarshalJSON(bz, &data); err != nil {
 		return fmt.Errorf("failed to unmarshal %s genesis state: %w", types.ModuleName, err)
@@ -83,9 +83,12 @@ func (AppModuleBasic) GetTxCmd() *cobra.Command {
 }
 
 // RegisterGRPCGatewayRoutes registers the gRPC Gateway routes for the distribution module.
-// also implements app modeul basic
+// also implements app module basic
 func (AppModuleBasic) RegisterGRPCGatewayRoutes(clientCtx client.Context, mux *runtime.ServeMux) {
-	types.RegisterQueryHandlerClient(context.Background(), mux, types.NewQueryClient(clientCtx))
+	err := types.RegisterQueryHandlerClient(context.Background(), mux, types.NewQueryClient(clientCtx))
+	if err != nil {
+		panic("Failed to register query handler")
+	}
 }
 
 // RegisterInterfaces implements app bmodule basic
@@ -100,6 +103,10 @@ type AppModule struct {
 	AppModuleBasic
 	keeper     keeper.Keeper
 	bankKeeper bankkeeper.Keeper
+}
+
+func (am AppModule) ConsensusVersion() uint64 {
+	return 1
 }
 
 // NewAppModule creates a new AppModule Object
@@ -118,8 +125,7 @@ func (AppModule) Name() string {
 
 // RegisterInvariants implements app module
 func (am AppModule) RegisterInvariants(ir sdk.InvariantRegistry) {
-	// TODO: make some invariants in the gravity module to ensure that
-	// coins aren't being fraudlently minted etc...
+	ir.RegisterRoute(types.ModuleName, "module-balance", keeper.ModuleBalanceInvariant(am.keeper))
 }
 
 // Route implements app module
@@ -144,7 +150,7 @@ func (am AppModule) RegisterServices(cfg module.Configurator) {
 }
 
 // InitGenesis initializes the genesis state for this module and implements app module.
-func (am AppModule) InitGenesis(ctx sdk.Context, cdc codec.JSONMarshaler, data json.RawMessage) []abci.ValidatorUpdate {
+func (am AppModule) InitGenesis(ctx sdk.Context, cdc codec.JSONCodec, data json.RawMessage) []abci.ValidatorUpdate {
 	var genesisState types.GenesisState
 	cdc.MustUnmarshalJSON(data, &genesisState)
 	keeper.InitGenesis(ctx, am.keeper, genesisState)
@@ -152,7 +158,7 @@ func (am AppModule) InitGenesis(ctx sdk.Context, cdc codec.JSONMarshaler, data j
 }
 
 // ExportGenesis exports the current genesis state to a json.RawMessage
-func (am AppModule) ExportGenesis(ctx sdk.Context, cdc codec.JSONMarshaler) json.RawMessage {
+func (am AppModule) ExportGenesis(ctx sdk.Context, cdc codec.JSONCodec) json.RawMessage {
 	gs := keeper.ExportGenesis(ctx, am.keeper)
 	return cdc.MustMarshalJSON(&gs)
 }

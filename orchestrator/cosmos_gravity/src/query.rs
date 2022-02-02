@@ -7,7 +7,13 @@ use gravity_proto::gravity::Attestation;
 use gravity_proto::gravity::Params;
 use gravity_proto::gravity::QueryAttestationsRequest;
 use gravity_proto::gravity::QueryBatchConfirmsRequest;
+use gravity_proto::gravity::QueryBatchFeeRequest;
+use gravity_proto::gravity::QueryBatchFeeResponse;
 use gravity_proto::gravity::QueryCurrentValsetRequest;
+use gravity_proto::gravity::QueryDenomToErc20Request;
+use gravity_proto::gravity::QueryDenomToErc20Response;
+use gravity_proto::gravity::QueryErc20ToDenomRequest;
+use gravity_proto::gravity::QueryErc20ToDenomResponse;
 use gravity_proto::gravity::QueryLastEventNonceByAddrRequest;
 use gravity_proto::gravity::QueryLastPendingBatchRequestByAddrRequest;
 use gravity_proto::gravity::QueryLastPendingLogicCallByAddrRequest;
@@ -59,7 +65,7 @@ pub async fn get_current_valset(
         Ok(valset.into())
     } else {
         error!("Current valset returned None? This should be impossible");
-        Err(GravityError::ValidationError(
+        Err(GravityError::InvalidEventLogError(
             "Must have a current valset!".into(),
         ))
     }
@@ -120,21 +126,23 @@ pub async fn get_all_valset_confirms(
     Ok(parsed_confirms)
 }
 
-pub async fn get_oldest_unsigned_transaction_batch(
+pub async fn get_oldest_unsigned_transaction_batches(
     client: &mut GravityQueryClient<Channel>,
     address: Address,
     prefix: String,
-) -> Result<Option<TransactionBatch>, GravityError> {
+) -> Result<Vec<TransactionBatch>, GravityError> {
     let response = client
         .last_pending_batch_request_by_addr(QueryLastPendingBatchRequestByAddrRequest {
             address: address.to_bech32(prefix).unwrap(),
         })
         .await?;
-    let batch = response.into_inner().batch;
-    match batch {
-        Some(batch) => Ok(Some(TransactionBatch::try_from(batch)?)),
-        None => Ok(None),
+
+    let batches = response.into_inner().batch;
+    let mut ret_batches = Vec::new();
+    for batch in batches {
+        ret_batches.push(TransactionBatch::try_from(batch)?);
     }
+    Ok(ret_batches)
 }
 
 /// gets the latest 100 transaction batches, regardless of token type
@@ -225,22 +233,23 @@ pub async fn get_logic_call_signatures(
         .collect()
 }
 
-pub async fn get_oldest_unsigned_logic_call(
+pub async fn get_oldest_unsigned_logic_calls(
     client: &mut GravityQueryClient<Channel>,
     address: Address,
     prefix: String,
-) -> Result<Option<LogicCall>, GravityError> {
+) -> Result<Vec<LogicCall>, GravityError> {
     let response = client
         .last_pending_logic_call_by_addr(QueryLastPendingLogicCallByAddrRequest {
             address: address.to_bech32(prefix).unwrap(),
         })
         .await?;
 
-    response
-        .into_inner()
-        .call
-        .map(LogicCall::try_from)
-        .transpose()
+    let calls = response.into_inner().call;
+    let mut ret_calls = Vec::new();
+    for call in calls {
+        ret_calls.push(LogicCall::try_from(call)?);
+    }
+    Ok(ret_calls)
 }
 
 pub async fn get_attestations(
@@ -268,4 +277,40 @@ pub async fn get_pending_send_to_eth(
         .await?;
 
     Ok(response.into_inner())
+}
+
+/// Gets erc20 for a given denom, this can take two forms a gravity0x... address where it's really
+/// just stripping the gravity prefix, or it can take a native asset like 'gravity' and return a erc20
+/// contract that represents it. This later case is also true for IBC coins
+pub async fn get_denom_to_erc20(
+    client: &mut GravityQueryClient<Channel>,
+    denom: String,
+) -> Result<QueryDenomToErc20Response, GravityError> {
+    let request = client
+        .denom_to_erc20(QueryDenomToErc20Request { denom })
+        .await?;
+    Ok(request.into_inner())
+}
+
+/// looks up the correct erc20 to represent this denom, for Ethereum originated assets this is just
+/// prefixing with 'gravity' but for native or IBC assets a lookup will be performed for the correct
+/// adopted address
+pub async fn get_erc20_to_denom(
+    client: &mut GravityQueryClient<Channel>,
+    erc20: EthAddress,
+) -> Result<QueryErc20ToDenomResponse, GravityError> {
+    let request = client
+        .erc20_to_denom(QueryErc20ToDenomRequest {
+            erc20: erc20.to_string(),
+        })
+        .await?;
+    Ok(request.into_inner())
+}
+
+/// Get a list of fees for all pending batches
+pub async fn get_pending_batch_fees(
+    client: &mut GravityQueryClient<Channel>,
+) -> Result<QueryBatchFeeResponse, GravityError> {
+    let request = client.batch_fees(QueryBatchFeeRequest {}).await?;
+    Ok(request.into_inner())
 }

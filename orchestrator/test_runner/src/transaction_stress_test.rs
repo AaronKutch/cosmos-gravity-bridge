@@ -10,7 +10,10 @@ use ethereum_gravity::{send_to_cosmos::send_to_cosmos, utils::get_tx_batch_nonce
 use futures::future::join_all;
 use gravity_proto::gravity::query_client::QueryClient as GravityQueryClient;
 use rand::seq::SliceRandom;
-use std::{collections::HashSet, time::Duration};
+use std::{
+    collections::HashSet,
+    time::{Duration, Instant},
+};
 use tokio::time::sleep;
 use tonic::transport::Channel;
 use web30::{client::Web3, types::SendTxOption};
@@ -41,7 +44,7 @@ pub async fn transaction_stress_test(
 ) {
     let mut grpc_client = grpc_client;
 
-    let no_relay_market_config = create_default_test_config();
+    let no_relay_market_config = create_no_batch_requests_config();
     start_orchestrators(keys.clone(), gravity_address, false, no_relay_market_config).await;
 
     // Generate 100 user keys to send ETH and multiple types of tokens
@@ -65,6 +68,7 @@ pub async fn transaction_stress_test(
         send_erc20_bulk(one_hundred_eth(), *token, &sending_eth_addresses, web30).await;
         info!("Sent {} addresses 100 {}", NUM_USERS, token);
     }
+    web30.wait_for_next_block(TOTAL_TIMEOUT).await.unwrap();
     for token in erc20_addresses.iter() {
         let mut sends = Vec::new();
         for keys in user_keys.iter() {
@@ -95,6 +99,7 @@ pub async fn transaction_stress_test(
             "Locked 100 {} from {} into the Gravity Ethereum Contract",
             token, NUM_USERS
         );
+        web30.wait_for_next_block(TOTAL_TIMEOUT).await.unwrap();
     }
 
     let check_all_deposists_bridged_to_cosmos = async {
@@ -253,34 +258,30 @@ pub async fn transaction_stress_test(
 
     for denom in denoms {
         info!("Requesting batch for {}", denom);
-        let res = send_request_batch(
-            keys[0].validator_key,
-            denom,
-            get_fee(),
-            contact,
-            Some(TIMEOUT),
-        )
-        .await
-        .unwrap();
+        let res = send_request_batch(keys[0].validator_key, denom, Some(get_fee()), contact)
+            .await
+            .unwrap();
         info!("batch request response is {:?}", res);
     }
 
-    let check_withdraws_from_ethereum = async {
-        loop {
-            let mut good = true;
-            let mut found_canceled = false;
-
-            for keys in user_keys.iter() {
-                let e_dest_addr = keys.eth_dest_address;
-                for token in erc20_addresses.iter() {
-                    let bal = web30.get_erc20_balance(*token, e_dest_addr).await.unwrap();
-                    if bal != send_amount.clone() {
-                        if e_dest_addr == user_who_cancels.eth_address && bal == 0u8.into() {
-                            info!("We successfully found the user who canceled their sends!");
-                            found_canceled = true;
-                        } else {
-                            good = false;
-                        }
+    let start = Instant::now();
+    let mut good = true;
+    let mut found_canceled = false;
+    while Instant::now() - start < TOTAL_TIMEOUT {
+        good = true;
+        found_canceled = false;
+        for keys in user_keys.iter() {
+            let e_dest_addr = keys.eth_dest_address;
+            for token in erc20_addresses.iter() {
+                let bal = get_erc20_balance_safe(*token, web30, e_dest_addr)
+                    .await
+                    .unwrap();
+                if bal != send_amount.clone() {
+                    if e_dest_addr == user_who_cancels.eth_address && bal == 0u8.into() {
+                        info!("We successfully found the user who canceled their sends!");
+                        found_canceled = true;
+                    } else {
+                        good = false;
                     }
                 }
             }
@@ -295,16 +296,6 @@ pub async fn transaction_stress_test(
 
             sleep(Duration::from_secs(5)).await;
         }
-    };
-
-    if tokio::time::timeout(TOTAL_TIMEOUT, check_withdraws_from_ethereum)
-        .await
-        .is_err()
-    {
-        panic!(
-            "Failed to perform all {} withdraws to Ethereum!",
-            NUM_USERS * erc20_addresses.len()
-        );
     }
 
     // we should find a batch nonce greater than zero since all the batches

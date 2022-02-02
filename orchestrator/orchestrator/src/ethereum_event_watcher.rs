@@ -16,6 +16,7 @@ use gravity_utils::{
         TransactionBatchExecutedEvent, ValsetUpdatedEvent,
     },
 };
+use metrics_exporter::metrics_errors_counter;
 use tonic::transport::Channel;
 use web30::client::Web3;
 use web30::jsonrpc::error::Web3Error;
@@ -25,6 +26,7 @@ pub struct CheckedNonces {
     pub event_nonce: Uint256,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn check_for_events(
     web3: &Web3,
     contact: &Contact,
@@ -33,10 +35,11 @@ pub async fn check_for_events(
     our_private_key: CosmosPrivateKey,
     fee: Coin,
     starting_block: Uint256,
+    block_delay: Uint256,
 ) -> Result<CheckedNonces, GravityError> {
     let our_cosmos_address = our_private_key.to_address(&contact.get_prefix()).unwrap();
     let latest_block = get_block_number_with_retry(web3).await;
-    let latest_block = latest_block - get_block_delay(web3).await;
+    let latest_block = latest_block - block_delay;
 
     let deposits = web3
         .check_for_events(
@@ -198,7 +201,7 @@ pub async fn check_for_events(
             // since we can't actually trust that the above txresponse is correct we have to check here
             // we may be able to trust the tx response post grpc
             if new_event_nonce == last_event_nonce {
-                return Err(GravityError::ValidationError(
+                return Err(GravityError::InvalidEventLogError(
                     format!("Claims did not process, trying to update but still on {}, trying again in a moment, check txhash {} for errors", last_event_nonce, res.txhash),
                 ));
             } else {
@@ -210,10 +213,10 @@ pub async fn check_for_events(
             event_nonce: new_event_nonce,
         })
     } else {
-        error!("Failed to get events");
-        Err(GravityError::RpcError(Box::new(Web3Error::BadResponse(
-            "Failed to get logs!".into(),
-        ))))
+        metrics_errors_counter(1, "Failed to get events");
+        Err(GravityError::EthereumRestError(Web3Error::BadResponse(
+            "Failed to get logs!".to_string(),
+        )))
     }
 }
 
@@ -237,13 +240,19 @@ pub async fn check_for_events(
 /// Given an uncle every 2.8 minutes, a 6 deep reorg would be 2.8 minutes * (100^4) or one
 /// 6 deep reorg every 53,272 years.
 ///
+/// Of course the above assume that no mining attacks occur. Once we bring that potential into
+/// the equation the question becomes 'how much money'. There is no depth safe from infinite
+/// spending. Taking some source values from https://blog.ethereum.org/2016/05/09/on-settlement-finality/
+/// we will use 13 blocks providing a 1/1_000_000 chance of an attacker with 25% of network hash
+/// power succeeding
+///
 pub async fn get_block_delay(web3: &Web3) -> Uint256 {
     let net_version = get_net_version_with_retry(web3).await;
 
     match net_version {
         // Mainline Ethereum, Ethereum classic, or the Ropsten, Kotti, Mordor testnets
         // all POW Chains
-        1 | 3 | 6 | 7 => 6u8.into(),
+        1 | 3 | 6 | 7 => 13u8.into(),
         // Dev, our own Gravity Ethereum testnet, and Hardhat respectively
         // all single signer chains with no chance of any reorgs
         2018 | 15 | 31337 => 0u8.into(),
@@ -252,6 +261,6 @@ pub async fn get_block_delay(web3: &Web3) -> Uint256 {
         // on experience with operational issues
         4 | 5 => 10u8.into(),
         // assume the safe option (POW) where we don't know
-        _ => 6u8.into(),
+        _ => 13u8.into(),
     }
 }
