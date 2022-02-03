@@ -10,7 +10,7 @@ homepage = "https://gravitybridge.althea.net/"
 
 [dependencies]
 cosmos_gravity = { path = "../cosmos_gravity" }
-ethereum_gravity = {path = "../ethereum_gravity"}
+ethereum_gravity = { path = "../ethereum_gravity" }
 gravity_proto = { path = "../gravity_proto/" }
 gravity_utils = { path = "../gravity_utils" }
 metrics_exporter = { path = "../metrics_exporter/" }
@@ -18,8 +18,7 @@ orchestrator = { path = "../orchestrator/" }
 relayer = { path = "../relayer/" }
 
 actix-rt = "2.2"
-tokio = {version = "1.4", features = ["macros", "rt-multi-thread"]}
-clap = {version="3.0.0-rc.7", features=["derive"]}
+clap = { version = "3.0.14", features = ["derive"] }
 clarity = "0.5"
 deep_space = "2.8"
 dirs = "4.0"
@@ -32,6 +31,7 @@ rand = "0.8"
 serde = "1.0"
 serde_derive = "1.0"
 serde_json = "1.0"
+tokio = { version = "1.4", features = ["macros", "rt-multi-thread"] }
 toml = "0.5"
 url = "2"
 web30 = { git = "https://github.com/onomyprotocol/web30.git", rev = "0f96ccd53867bafe4c08ae59a1266ec0256e1cd4" }

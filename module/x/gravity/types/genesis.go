@@ -82,6 +82,9 @@ var (
 	// this could be for technical reasons (zero address) or non-technical reasons, these apply across all ERC20 tokens
 	ParamStoreEthereumBlacklist = []byte("EthereumBlacklist")
 
+	// ParamStoreErc20ToDenomPermanentSwap the key of Erc20ToDenomPair for store.
+	ParamStoreErc20ToDenomPermanentSwap = []byte("Erc20ToDenomPermanentSwap")
+
 	// Ensure that params implements the proper interface
 	_ paramtypes.ParamSet = &Params{
 		GravityId:                    "",
@@ -105,6 +108,7 @@ var (
 		},
 		BridgeActive:      true,
 		EthereumBlacklist: []string{},
+		Erc20ToDenomPermanentSwap: ERC20ToDenom{},
 	}
 )
 
@@ -156,6 +160,7 @@ func DefaultParams() *Params {
 		ValsetReward:                 sdk.Coin{Denom: "", Amount: sdk.ZeroInt()},
 		BridgeActive:                 true,
 		EthereumBlacklist:            []string{},
+		Erc20ToDenomPermanentSwap:    ERC20ToDenom{},
 	}
 }
 
@@ -209,6 +214,9 @@ func (p Params) ValidateBasic() error {
 	if err := validateValsetRewardAmount(p.ValsetReward); err != nil {
 		return sdkerrors.Wrap(err, "ValsetReward amount")
 	}
+	if err := validateErc20ToDenomPermanentSwap(p.Erc20ToDenomPermanentSwap); err != nil {
+		return sdkerrors.Wrap(err, "Erc20ToDenomPermanentSwap")
+	}
 	return nil
 }
 
@@ -258,6 +266,7 @@ func (p *Params) ParamSetPairs() paramtypes.ParamSetPairs {
 		paramtypes.NewParamSetPair(ParamStoreValsetRewardAmount, &p.ValsetReward, validateValsetRewardAmount),
 		paramtypes.NewParamSetPair(ParamStoreBridgeActive, &p.BridgeActive, validateBridgeActive),
 		paramtypes.NewParamSetPair(ParamStoreEthereumBlacklist, &p.EthereumBlacklist, validateEthereumBlacklistAddresses),
+		paramtypes.NewParamSetPair(ParamStoreErc20ToDenomPermanentSwap, &p.Erc20ToDenomPermanentSwap, validateErc20ToDenomPermanentSwap),
 	}
 }
 

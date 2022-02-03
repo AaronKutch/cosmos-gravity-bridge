@@ -100,6 +100,10 @@ func (a AttestationHandler) Handle(ctx sdk.Context, att types.Attestation, claim
 		coins := sdk.Coins{sdk.NewCoin(denom, claim.Amount)}
 
 		if !isCosmosOriginated {
+			swapPair := a.keeper.GetParams(ctx).Erc20ToDenomPermanentSwap
+			if swapPair.Erc20 != "" && swapPair.Denom != "" && denom == types.ModuleName+swapPair.Erc20 {
+				denom = swapPair.Denom
+			}
 			// We need to mint eth-originated coins (aka vouchers)
 			// Make sure that users are not bridging an impossible amount
 			prevSupply := a.bankKeeper.GetSupply(ctx, denom)

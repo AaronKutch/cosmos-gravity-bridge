@@ -583,15 +583,14 @@ contract Gravity is ReentrancyGuard {
 
 		state_lastEventNonce = state_lastEventNonce + 1;
 
-		// emit to Cosmos the actual amount our balance has changed, rather than the user
-		// provided amount. This protects against a small set of wonky ERC20 behavior, like
-		// burning on send but not tokens that for example change every users balance every day.
-
 		// If Token is wNOM then Burn it
 		if(_tokenContract == wNomAddress) {
 			wNomBurner.burn(_amount);
 		}
 
+		// emit to Cosmos the actual amount our balance has changed, rather than the user
+		// provided amount. This protects against a small set of wonky ERC20 behavior, like
+		// burning on send but not tokens that for example change every users balance every day.
 		emit SendToCosmosEvent(
 			_tokenContract,
 			msg.sender,

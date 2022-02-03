@@ -18,11 +18,12 @@ use ethereum_gravity::utils::get_tx_batch_nonce;
 use gravity_proto::gravity::query_client::QueryClient as GravityQueryClient;
 use gravity_utils::types::GravityBridgeToolsConfig;
 use rand::Rng;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::time::sleep;
 use tonic::transport::Channel;
 use web30::amm::{DAI_CONTRACT_ADDRESS, WETH_CONTRACT_ADDRESS};
 use web30::client::Web3;
+use web30::jsonrpc::error::Web3Error;
 
 pub async fn relay_market_test(
     web30: &Web3,
@@ -96,21 +97,29 @@ async fn setup_batch_test(
         weth_acquired
     );
     // Acquire 1,000 WETH worth of DAI (probably ~23,000 DAI)
-    let token_acquired = web30
-        .swap_uniswap(
-            *MINER_PRIVATE_KEY,
-            *WETH_CONTRACT_ADDRESS,
-            erc20_contract,
-            None,
-            one_eth() * 1000u16.into(),
-            None,
-            None,
-            None,
-            None,
-            None,
-            Some(TOTAL_TIMEOUT),
-        )
-        .await;
+    info!("Starting swap!");
+    let start = Instant::now();
+    let mut token_acquired = Err(Web3Error::BadInput("Dummy Error".to_string()));
+    while Instant::now() - start < TOTAL_TIMEOUT {
+        token_acquired = web30
+            .swap_uniswap(
+                *MINER_PRIVATE_KEY,
+                *WETH_CONTRACT_ADDRESS,
+                erc20_contract,
+                None,
+                one_eth() * 1000u16.into(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some(TOTAL_TIMEOUT),
+            )
+            .await;
+        if token_acquired.is_ok() {
+            break;
+        }
+    }
     info!("Swap result is {:?}", token_acquired);
     assert!(
         !token_acquired.is_err(),

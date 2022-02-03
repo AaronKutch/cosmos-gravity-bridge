@@ -379,80 +379,86 @@ pub async fn test_erc20_deposit_result(
 
     check_send_to_cosmos_attestation(&mut grpc_client, erc20_address, dest, *MINER_ADDRESS).await?;
 
-    let start = Instant::now();
     let duration = match timeout {
         Some(w) => w,
         None => TOTAL_TIMEOUT,
     };
-    while Instant::now() - start < duration {
-        match (
-            start_coin.clone(),
-            contact
-                .get_balance(dest, format!("gravity{}", erc20_address))
-                .await
-                .unwrap(),
-        ) {
-            (Some(start_coin), Some(end_coin)) => {
-                // When a bridge governance vote happens, the orchestrator will replay all incomplete
-                // sends to cosmos on the next send to cosmos transaction, so we need to use expected_change
-                if let Some(expected) = expected_change.clone() {
-                    if end_coin.amount.clone() - start_coin.amount.clone() == expected
-                        && start_coin.denom == end_coin.denom
-                    {
-                        info!(
-                            "Successfully bridged ERC20 {}{} to Cosmos! Balance is now {}{}",
-                            amount, start_coin.denom, end_coin.amount, end_coin.denom
-                        );
-                        return Ok(());
-                    }
-                } else {
-                    let expected_end = start_coin.amount.checked_add(&amount.clone());
-                    if expected_end.is_none() {
-                        info!(
-                            "Expecting overflow from addition of {:?} + {:?}!",
-                            start_coin.amount,
-                            amount.clone()
-                        );
-                    } else if start_coin.amount + amount.clone() == end_coin.amount
-                        && start_coin.denom == end_coin.denom
-                    {
-                        info!(
-                            "Successfully bridged ERC20 {}{} to Cosmos! Balance is now {}{}",
-                            amount, start_coin.denom, end_coin.amount, end_coin.denom
-                        );
-                        return Ok(());
+    match tokio::time::timeout(duration, async {
+        loop {
+            match (
+                start_coin.clone(),
+                contact
+                    .get_balance(dest, format!("gravity{}", erc20_address))
+                    .await
+                    .unwrap(),
+            ) {
+                (Some(start_coin), Some(end_coin)) => {
+                    // When a bridge governance vote happens, the orchestrator will replay all incomplete
+                    // sends to cosmos on the next send to cosmos transaction, so we need to use expected_change
+                    if let Some(expected) = expected_change.clone() {
+                        if end_coin.amount.clone() - start_coin.amount.clone() == expected
+                            && start_coin.denom == end_coin.denom
+                        {
+                            info!(
+                                "Successfully bridged ERC20 {}{} to Cosmos! Balance is now {}{}",
+                                amount, start_coin.denom, end_coin.amount, end_coin.denom
+                            );
+                            return Ok(());
+                        }
+                    } else {
+                        let expected_end = start_coin.amount.checked_add(&amount.clone());
+                        if expected_end.is_none() {
+                            info!(
+                                "Expecting overflow from addition of {:?} + {:?}!",
+                                start_coin.amount,
+                                amount.clone()
+                            );
+                        } else if start_coin.amount + amount.clone() == end_coin.amount
+                            && start_coin.denom == end_coin.denom
+                        {
+                            info!(
+                                "Successfully bridged ERC20 {}{} to Cosmos! Balance is now {}{}",
+                                amount, start_coin.denom, end_coin.amount, end_coin.denom
+                            );
+                            return Ok(());
+                        }
                     }
                 }
-            }
-            (None, Some(end_coin)) => {
-                // When a bridge governance vote happens, the orchestrator will replay all incomplete
-                // sends to cosmos on the next send to cosmos transaction, so we need to use expected_change
-                if let Some(expected) = expected_change.clone() {
-                    if end_coin.amount == expected {
+                (None, Some(end_coin)) => {
+                    // When a bridge governance vote happens, the orchestrator will replay all incomplete
+                    // sends to cosmos on the next send to cosmos transaction, so we need to use expected_change
+                    if let Some(expected) = expected_change.clone() {
+                        if end_coin.amount == expected {
+                            info!(
+                                "Successfully bridged ERC20 {}{} to Cosmos! Balance is now {}{}",
+                                amount, end_coin.denom, end_coin.amount, end_coin.denom,
+                            );
+                            return Ok(());
+                        }
+                    } else if amount == end_coin.amount {
                         info!(
                             "Successfully bridged ERC20 {}{} to Cosmos! Balance is now {}{}",
                             amount, end_coin.denom, end_coin.amount, end_coin.denom,
                         );
                         return Ok(());
+                    } else {
+                        panic!("Failed to bridge ERC20!")
                     }
-                } else if amount == end_coin.amount {
-                    info!(
-                        "Successfully bridged ERC20 {}{} to Cosmos! Balance is now {}{}",
-                        amount, end_coin.denom, end_coin.amount, end_coin.denom
-                    );
-                    return Ok(());
-                } else {
-                    panic!("Failed to bridge ERC20!")
                 }
+                _ => (),
             }
-            _ => {}
+
+            info!("Waiting for ERC20 deposit");
+            contact.wait_for_next_block(TOTAL_TIMEOUT).await.unwrap();
         }
-        info!("Waiting for ERC20 deposit");
-        contact.wait_for_next_block(TOTAL_TIMEOUT).await.unwrap();
+    })
+    .await
+    {
+        Err(_) => Err(GravityError::ValidationError(
+            "Did not complete deposit!".to_string(),
+        )),
+        Ok(()) => Ok(()),
     }
-    Err(GravityError::InvalidBridgeStateError(
-        "Did not complete deposit!".to_string(),
-    ))
 }
 
 // Tries up to TOTAL_TIMEOUT time to find a MsgSendToCosmosClaim attestation created in the
@@ -463,28 +469,35 @@ async fn check_send_to_cosmos_attestation(
     receiver: CosmosAddress,
     sender: EthAddress,
 ) -> Result<(), GravityError> {
-    let start = Instant::now();
-    let mut found = false;
-    loop {
-        iterate_attestations(grpc_client, &mut |decoded: MsgSendToCosmosClaim| {
-            let right_contract = decoded.token_contract == erc20_address.to_string();
-            let right_destination = decoded.cosmos_receiver == receiver.to_string();
-            let right_sender = decoded.ethereum_sender == sender.to_string();
-            found = right_contract && right_destination && right_sender;
-        })
-        .await;
-        if found {
-            break;
-        } else if Instant::now() - start > TOTAL_TIMEOUT {
-            return Err(GravityError::InvalidBridgeStateError(
-                "Could not find the send_to_cosmos attestation we were looking for!".to_string(),
-            ));
+    match tokio::time::timeout(TOTAL_TIMEOUT, async {
+        loop {
+            let mut found = false;
+
+            iterate_attestations(grpc_client, &mut |decoded: MsgSendToCosmosClaim| {
+                let right_contract = decoded.token_contract == erc20_address.to_string();
+                let right_destination = decoded.cosmos_receiver == receiver.to_string();
+                let right_sender = decoded.ethereum_sender == sender.to_string();
+                found = right_contract && right_destination && right_sender;
+            })
+            .await;
+
+            if found {
+                break;
+            } else {
+                sleep(Duration::from_secs(5)).await;
+            }
         }
-        info!("Looking for send_to_cosmos attestations");
-        sleep(Duration::from_secs(10)).await;
+    })
+    .await
+    {
+        Err(_) => Err(GravityError::ValidationError(
+            "Could not find the send_to_cosmos attestation we were looking for!".to_string(),
+        )),
+        Ok(_) => {
+            info!("Found the expected MsgSendToCosmosClaim attestation");
+            Ok(())
+        }
     }
-    info!("Found the expected MsgSendToCosmosClaim attestation");
-    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -557,32 +570,39 @@ async fn test_batch(
             .expect("Failed to get current eth valset");
     let starting_batch_nonce = current_eth_batch_nonce;
 
-    let start = Instant::now();
-    while starting_batch_nonce == current_eth_batch_nonce {
-        info!(
-            "Batch is not yet submitted {}>, waiting",
-            starting_batch_nonce
-        );
-        current_eth_batch_nonce =
-            get_tx_batch_nonce(gravity_address, erc20_contract, *MINER_ADDRESS, web30)
-                .await
-                .expect("Failed to get current eth tx batch nonce");
-        sleep(Duration::from_secs(4)).await;
-        if Instant::now() - start > TOTAL_TIMEOUT {
-            panic!("Failed to submit transaction batch set");
+    match tokio::time::timeout(TOTAL_TIMEOUT, async {
+        loop {
+            let current_eth_batch_nonce =
+                get_tx_batch_nonce(gravity_address, erc20_contract, *MINER_ADDRESS, web30)
+                    .await
+                    .expect("Failed to get current eth tx batch nonce");
+
+            if starting_batch_nonce == current_eth_batch_nonce {
+                info!(
+                    "Batch is not yet submitted {}>, waiting",
+                    current_eth_batch_nonce
+                );
+                sleep(Duration::from_secs(4)).await;
+            } else {
+                return current_eth_batch_nonce;
+            }
+        }
+    })
+    .await
+    {
+        Err(_) => panic!("Failed to submit transaction batch set"),
+        Ok(current_eth_batch_nonce) => {
+            if web30.eth_get_balance(dest_eth_address).await.unwrap() == 0u8.into() {
+                // we have to send this address one eth so that it can perform contract calls
+                send_one_eth(dest_eth_address, web30).await;
+            }
+            check_erc20_balance(erc20_contract, amount.clone(), dest_eth_address, web30).await;
+            info!(
+                "Successfully updated txbatch nonce to {} and sent {}{} tokens to Ethereum!",
+                current_eth_batch_nonce, amount, token_name
+            );
         }
     }
-
-    if web30.eth_get_balance(dest_eth_address).await.unwrap() == 0u8.into() {
-        // we have to send this address one eth so that it can perform contract calls
-        send_one_eth(dest_eth_address, web30).await;
-    }
-
-    check_erc20_balance(erc20_contract, amount.clone(), dest_eth_address, web30).await;
-    info!(
-        "Successfully updated txbatch nonce to {} and sent {}{} tokens to Ethereum!",
-        current_eth_batch_nonce, amount, token_name
-    );
 }
 
 // this function submits a EthereumBridgeDepositClaim to the module with a given nonce. This can be set to be a nonce that has

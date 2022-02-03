@@ -136,6 +136,10 @@ message Params {
   // addresses on this blacklist are forbidden from depositing or withdrawing
   // from Ethereum to the bridge
   repeated string ethereum_blacklist = 19;
+  // the pair of eth token and denom to automatically swap once the erc20 token is bridged.
+  ERC20ToDenom erc20_to_denom_permanent_swap = 50[
+    (gogoproto.nullable)   = false
+  ];
 }
 
 // GenesisState struct, containing all persistant data required by the Gravity module

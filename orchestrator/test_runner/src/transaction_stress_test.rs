@@ -264,24 +264,24 @@ pub async fn transaction_stress_test(
         info!("batch request response is {:?}", res);
     }
 
-    let start = Instant::now();
-    let mut good = true;
-    let mut found_canceled = false;
-    while Instant::now() - start < TOTAL_TIMEOUT {
-        good = true;
-        found_canceled = false;
-        for keys in user_keys.iter() {
-            let e_dest_addr = keys.eth_dest_address;
-            for token in erc20_addresses.iter() {
-                let bal = get_erc20_balance_safe(*token, web30, e_dest_addr)
-                    .await
-                    .unwrap();
-                if bal != send_amount.clone() {
-                    if e_dest_addr == user_who_cancels.eth_address && bal == 0u8.into() {
-                        info!("We successfully found the user who canceled their sends!");
-                        found_canceled = true;
-                    } else {
-                        good = false;
+    let check_withdraws_from_ethereum = async {
+        loop {
+            let mut good = true;
+            let mut found_canceled = false;
+
+            for keys in user_keys.iter() {
+                let e_dest_addr = keys.eth_dest_address;
+                for token in erc20_addresses.iter() {
+                    let bal = get_erc20_balance_safe(*token, web30, e_dest_addr)
+                        .await
+                        .unwrap();
+                    if bal != send_amount.clone() {
+                        if e_dest_addr == user_who_cancels.eth_address && bal == 0u8.into() {
+                            info!("We successfully found the user who canceled their sends!");
+                            found_canceled = true;
+                        } else {
+                            good = false;
+                        }
                     }
                 }
             }
@@ -296,6 +296,16 @@ pub async fn transaction_stress_test(
 
             sleep(Duration::from_secs(5)).await;
         }
+    };
+
+    if tokio::time::timeout(TOTAL_TIMEOUT, check_withdraws_from_ethereum)
+        .await
+        .is_err()
+    {
+        panic!(
+            "Failed to perform all {} withdraws to Ethereum!",
+            NUM_USERS * erc20_addresses.len()
+        );
     }
 
     // we should find a batch nonce greater than zero since all the batches
