@@ -12,8 +12,10 @@ use crate::MINER_ADDRESS;
 use crate::MINER_PRIVATE_KEY;
 use crate::TOTAL_TIMEOUT;
 use crate::{get_fee, utils::ValidatorKeys};
+use actix::clock::sleep;
 use clarity::Address as EthAddress;
 use clarity::Uint256;
+use cosmos_gravity::send::send_request_batch;
 use cosmos_gravity::send::send_to_eth;
 use deep_space::coin::Coin;
 use deep_space::Contact;
@@ -24,7 +26,7 @@ use gravity_proto::gravity::{
     query_client::QueryClient as GravityQueryClient, QueryDenomToErc20Request,
 };
 use std::panic;
-use std::time::Instant;
+use std::time::Duration;
 use tonic::transport::Channel;
 use web30::client::Web3;
 use web30::types::SendTxOption;
@@ -117,7 +119,7 @@ pub async fn happy_path_test_v2(
     let res = send_request_batch(
         keys[0].validator_key,
         token_to_send_to_eth.clone(),
-        get_fee(),
+        Some(get_fee()),
         contact,
     )
     .await
@@ -219,20 +221,20 @@ pub async fn deploy_cosmos_representing_erc20_and_check_adoption(
         .await;
     }
 
-    let token_to_send_to_eth = footoken_metadata().denom;
     let get_cosmos_asset_on_eth = async {
         loop {
             // the erc20 representing the cosmos asset on Ethereum
             if let Ok(res) = grpc_client
                 .denom_to_erc20(QueryDenomToErc20Request {
-                    denom: token_to_send_to_eth.clone(),
+                    denom: token_metadata.base.clone(),
                 })
                 .await
             {
                 let erc20 = res.into_inner().erc20;
                 info!(
                     "Successfully adopted {} token contract of {}",
-                    token_to_send_to_eth, erc20
+                    token_metadata.base.clone(),
+                    erc20
                 );
                 return erc20;
             }
@@ -244,7 +246,7 @@ pub async fn deploy_cosmos_representing_erc20_and_check_adoption(
     let erc20_contract = match tokio::time::timeout(TOTAL_TIMEOUT, get_cosmos_asset_on_eth).await {
         Err(_) => panic!(
             "Cosmos did not adopt the ERC20 contract for {} it must be invalid in some way",
-            token_to_send_to_eth
+            token_metadata.base.clone()
         ),
         Ok(erc20_contract) => erc20_contract.parse().unwrap(),
     };

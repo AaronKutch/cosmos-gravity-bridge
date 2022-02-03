@@ -24,7 +24,7 @@ use gravity_utils::types::SendToCosmosEvent;
 use num::CheckedAdd;
 use prost::Message;
 use std::any::type_name;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::time::sleep;
 use tonic::transport::Channel;
 use web30::client::Web3;
@@ -403,7 +403,7 @@ pub async fn test_erc20_deposit_result(
                                 "Successfully bridged ERC20 {}{} to Cosmos! Balance is now {}{}",
                                 amount, start_coin.denom, end_coin.amount, end_coin.denom
                             );
-                            return Ok(());
+                            return;
                         }
                     } else {
                         let expected_end = start_coin.amount.checked_add(&amount.clone());
@@ -420,7 +420,7 @@ pub async fn test_erc20_deposit_result(
                                 "Successfully bridged ERC20 {}{} to Cosmos! Balance is now {}{}",
                                 amount, start_coin.denom, end_coin.amount, end_coin.denom
                             );
-                            return Ok(());
+                            return;
                         }
                     }
                 }
@@ -433,14 +433,14 @@ pub async fn test_erc20_deposit_result(
                                 "Successfully bridged ERC20 {}{} to Cosmos! Balance is now {}{}",
                                 amount, end_coin.denom, end_coin.amount, end_coin.denom,
                             );
-                            return Ok(());
+                            return;
                         }
                     } else if amount == end_coin.amount {
                         info!(
                             "Successfully bridged ERC20 {}{} to Cosmos! Balance is now {}{}",
                             amount, end_coin.denom, end_coin.amount, end_coin.denom,
                         );
-                        return Ok(());
+                        return;
                     } else {
                         panic!("Failed to bridge ERC20!")
                     }
@@ -564,11 +564,10 @@ async fn test_batch(
     .await
     .expect("Failed to get batch to sign");
 
-    let mut current_eth_batch_nonce =
+    let starting_batch_nonce =
         get_tx_batch_nonce(gravity_address, erc20_contract, *MINER_ADDRESS, web30)
             .await
             .expect("Failed to get current eth valset");
-    let starting_batch_nonce = current_eth_batch_nonce;
 
     match tokio::time::timeout(TOTAL_TIMEOUT, async {
         loop {

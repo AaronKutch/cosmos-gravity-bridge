@@ -10,10 +10,7 @@ use ethereum_gravity::{send_to_cosmos::send_to_cosmos, utils::get_tx_batch_nonce
 use futures::future::join_all;
 use gravity_proto::gravity::query_client::QueryClient as GravityQueryClient;
 use rand::seq::SliceRandom;
-use std::{
-    collections::HashSet,
-    time::{Duration, Instant},
-};
+use std::{collections::HashSet, time::Duration};
 use tokio::time::sleep;
 use tonic::transport::Channel;
 use web30::{client::Web3, types::SendTxOption};
