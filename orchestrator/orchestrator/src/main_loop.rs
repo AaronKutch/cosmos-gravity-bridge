@@ -139,7 +139,10 @@ pub async fn eth_oracle_main_loop(
 
                 metrics_latest(block_height, "latest_cosmos_block");
                 // Converting into u64
-                metrics_latest(latest_eth_block.to_u64_digits()[0], "latest_eth_block");
+                metrics_latest(
+                    *latest_eth_block.to_u64_digits().get(0).unwrap_or(&0),
+                    "latest_eth_block",
+                );
             }
             (Ok(_latest_eth_block), Ok(ChainStatus::Syncing)) => {
                 warn!("Cosmos node syncing, Eth oracle paused");
@@ -206,7 +209,10 @@ pub async fn eth_oracle_main_loop(
                     .await;
                 }
                 last_checked_event = nonces.event_nonce;
-                metrics_latest(last_checked_event.to_u64_digits()[0], "last_checked_event");
+                metrics_latest(
+                    *last_checked_event.to_u64_digits().get(0).unwrap_or(&0),
+                    "last_checked_event",
+                );
             }
             Err(e) => {
                 error!("Failed to get events for block range, Check your Eth node and Cosmos gRPC {:?}", e);
