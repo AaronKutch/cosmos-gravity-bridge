@@ -16,4 +16,9 @@ killall -9 test-runner
 set -e
 
 pushd /gravity/orchestrator/test_runner
-RUST_BACKTRACE=full TEST_TYPE=$TEST_TYPE RUST_LOG=INFO PATH=$PATH:$HOME/.cargo/bin cargo run --release --bin test-runner
+
+if [[ "${USE_LOCAL_ARTIFACTS:-0}" -eq "0" ]]; then
+    RUST_BACKTRACE=full TEST_TYPE=$TEST_TYPE RUST_LOG=INFO PATH=$PATH:$HOME/.cargo/bin cargo run --release --bin test-runner
+else
+    RUST_BACKTRACE=full TEST_TYPE=$TEST_TYPE RUST_LOG=INFO PATH=$PATH:$HOME/.cargo/bin /gravity/orchestrator/target/release/test-runner
+fi

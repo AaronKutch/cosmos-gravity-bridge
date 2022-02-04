@@ -3,6 +3,8 @@ typechain
 target
 tests/test-runner/Cargo.lock
 tests/dockerfile/gravity.tar.gz
+tests/dockerfile/gravity.tar
+tests/dockerfile/go_gravity_bin
 solidity/dist
 orchestrator/bins
 

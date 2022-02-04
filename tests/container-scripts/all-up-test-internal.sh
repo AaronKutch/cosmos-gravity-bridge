@@ -16,6 +16,10 @@ bash /gravity/tests/container-scripts/run-testnet.sh $NODES $TEST_TYPE $ALCHEMY_
 
 # deploy the ethereum contracts
 pushd /gravity/orchestrator/test_runner
-DEPLOY_CONTRACTS=1 RUST_BACKTRACE=full RUST_LOG="INFO,relayer=DEBUG,orchestrator=DEBUG" PATH=$PATH:$HOME/.cargo/bin cargo run --release --bin test-runner
+if [[ "${USE_LOCAL_ARTIFACTS:-0}" -eq "0" ]]; then
+    DEPLOY_CONTRACTS=1 RUST_BACKTRACE=full RUST_LOG="INFO,relayer=DEBUG,orchestrator=DEBUG" PATH=$PATH:$HOME/.cargo/bin cargo run --release --bin test-runner
+else
+    DEPLOY_CONTRACTS=1 RUST_BACKTRACE=full RUST_LOG="INFO,relayer=DEBUG,orchestrator=DEBUG" PATH=$PATH:$HOME/.cargo/bin /gravity/orchestrator/target/release/test-runner
+fi
 
 bash /gravity/tests/container-scripts/integration-tests.sh $NODES $TEST_TYPE
