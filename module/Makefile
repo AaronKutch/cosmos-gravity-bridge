@@ -67,7 +67,7 @@ test:
 	@go test -mod=readonly $(PACKAGES)
 
 build-linux-amd64:
-	GOOS=linux GOARCH=amd64 go build -o $(GOBIN)/gravity $(BUILD_FLAGS) ./cmd/gravity/main.go
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o $(GOBIN)/gravity $(BUILD_FLAGS) ./cmd/gravity/main.go
 
 # look into .golangci.yml for enabling / disabling linters
 lint:

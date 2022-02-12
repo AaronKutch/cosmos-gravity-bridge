@@ -27,13 +27,18 @@ else
         PATH=$PATH:/usr/local/go/bin GOBIN=$DOCKERFOLDER make build-linux-amd64
 
     # build npm artifacts
-    pushd $REPOFOLDER/solidity/ &&
-    HUSKY_SKIP_INSTALL=1 npm ci
-    npm run typechain
+    # `npm ci` is for clean installations, use `npm install` here
+    pushd $REPOFOLDER/solidity/ && HUSKY_SKIP_INSTALL=1 npm install && npm run typechain
 
-    # compress binaries
     pushd $DOCKERFOLDER
-    tar -cvf gravity.tar gravity
+    # Add Go binary
+    tar -cvf gravity.tar --transform="s,gravity,gravity/tests/dockerfile/gravity," gravity
+    # Add Rust binary
+    RUST_TEST_RUNNER=$REPOFOLDER/orchestrator/target/x86_64-unknown-linux-musl/release/
+    # --transform is not behaving, temporarily move so we can tar it directly
+    pushd $RUST_TEST_RUNNER
+    tar --append --file=$DOCKERFOLDER/gravity.tar --transform="s,test-runner,gravity/orchestrator/target/x86_64-unknown-linux-musl/release/test-runner," test-runner
+    pushd $DOCKERFOLDER
 
     # clean
     rm gravity

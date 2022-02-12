@@ -24,5 +24,5 @@ RUN if [[ "${USE_LOCAL_ARTIFACTS:-0}" -eq "0" ]] ; then \
     && pushd /gravity/solidity/ \
     && npm ci \
 ; else \
-    mv gravity /usr/bin/gravity \
+    mv gravity/tests/dockerfile/gravity /usr/bin/gravity \
 ; fi
