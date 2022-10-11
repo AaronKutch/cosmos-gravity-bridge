@@ -16,8 +16,7 @@ tokio = { version = "1.17", features = ["macros", "rt-multi-thread"] }
 tonic = "0.6"
 u64_array_bigints = { version = "0.3", default-features = false, features = ["serde_support"] }
 url = "2"
-# FIXME after https://github.com/PureStake/moonbeam/issues/1572 is fixed use normal `web30`
-web30 = { git = "https://github.com/AaronKutch/web30.git", rev = "fa540259eea59506670f71f1eb2ab6ac0557b721" }
+web30 = { git = "https://github.com/onomyprotocol/web30.git", rev = "645c0509246fedff01aed1aa4c26eb804f3fec1a" }
 
 [dev_dependencies]
 rand = "0.8"
