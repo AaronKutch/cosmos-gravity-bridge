@@ -7,7 +7,7 @@ RUN dnf install -y git make cmake gcc gcc-c++ which iproute iputils procps-ng vi
 # only required for deployment script
 RUN npm install -g ts-node && npm install -g typescript
 
-COPY --from=purestake/moonbeam:v0.26.1 /moonbeam/moonbeam /usr/bin/moonbeam
+COPY --from=purestake/moonbeam:sha-27df52c9 /moonbeam/moonbeam /usr/bin/moonbeam
 
 # the actual source code for this repo, this **only** includes checked in files!
 # this is a bit of a pain but it does speed things up a lot
