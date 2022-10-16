@@ -64,4 +64,10 @@ else
     #    --http.port="8545" \
     #    --http.api="eth,debug,net,admin,web3,personal,txpool,ftm,dag" \
     #    --datadir="/opera_datadir" &> /opera.log &
+
+    echo "waiting for go-opera to come online"
+    until $(curl --output /dev/null --fail --silent --header "content-type: application/json" --data '{"method":"eth_blockNumber","params":[],"id":93,"jsonrpc":"2.0"}' http://localhost:8545); do
+        printf '.'
+        sleep 1
+    done
 fi

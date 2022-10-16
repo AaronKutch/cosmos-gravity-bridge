@@ -7,8 +7,7 @@ RUN dnf install -y git make gcc gcc-c++ which iproute iputils procps-ng vim-mini
 # only required for deployment script
 RUN npm install -g ts-node && npm install -g typescript
 
-ADD https://github.com/AaronKutch/go-opera/releases/download/onomy_release_94738741/opera.tar.gz /opera/
-RUN cd /opera && tar -xvf * && mv /opera/opera /usr/bin/opera
+ADD https://github.com/AaronKutch/go-opera/releases/download/onomy_release_8530dc13/opera /usr/bin/opera
 
 # the actual source code for this repo, this **only** includes checked in files!
 # this is a bit of a pain but it does speed things up a lot
