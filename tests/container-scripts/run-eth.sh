@@ -66,8 +66,20 @@ else
     #    --datadir="/opera_datadir" &> /opera.log &
 
     echo "waiting for go-opera to come online"
-    until $(curl --output /dev/null --fail --silent --header "content-type: application/json" --data '{"method":"eth_blockNumber","params":[],"id":93,"jsonrpc":"2.0"}' http://localhost:8545); do
-        printf '.'
+    until $(curl --output /dev/null --fail --silent --header "content-type: application/json" --data '{"method":"eth_blockNumber","params":[],"id":1,"jsonrpc":"2.0"}' http://localhost:8545); do
+        sleep 1
+    done
+    # go-opera takes a few seconds to sync
+    echo "waiting for go-opera to sync"
+    until [ "$(curl -s --header "content-type: application/json" --data '{"id":1,"jsonrpc":"2.0","method":"eth_syncing","params":[]}' http://localhost:8545)" == '{"jsonrpc":"2.0","id":1,"result":false}' ]; do
+        sleep 1
+    done
+
+    # send from dev account (priv 0x163F5F0F9A621D72FEDD85FFCA3D08D131AB4E812181E0D30FFD1C885D20AAC7/pub 0x239fA7623354eC26520dE878B52f13Fe84b06971) to 0xBf660843528035a5A4921534E156a27e64B231fE
+    curl -s --header "content-type: application/json" --data '{"id":12,"jsonrpc":"2.0","method":"eth_sendRawTransaction","params":["0xf871808506fc23ac00825dc094bf660843528035a5a4921534e156a27e64b231fe8b52b7d2dcc80cd2e400000080821f6aa020bac4e3944d6b12075eee0e58ec9e40270a9a977feba34362190a825575f550a07272d97392a1a7d0bda2a0bb62da49b45275f873259a16e463603a60abf9a5cf"]}' http://localhost:8545
+
+    echo "waiting for transaction to account 0xBf6608..."
+    until [ "$(curl -s --header "content-type: application/json" --data '{"id":1,"jsonrpc":"2.0","method":"eth_getBalance","params":["0xBf660843528035a5A4921534E156a27e64B231fE","latest"]}' http://localhost:8545)" == '{"jsonrpc":"2.0","id":1,"result":"0x52b7d2dcc80cd2e4000000"}' ]; do
         sleep 1
     done
 fi

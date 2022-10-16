@@ -3,11 +3,12 @@ ARG use_local_artifacts
 ENV USE_LOCAL_ARTIFACTS=${use_local_artifacts:-0}
 ENV GOPATH=/go
 ENV PATH=$PATH:/go/bin
-RUN dnf install -y git make gcc gcc-c++ which iproute iputils procps-ng vim-minimal tmux net-tools htop tar jq npm openssl-devel perl rust cargo golang
+RUN dnf install -y git make cmake gcc gcc-c++ which iproute iputils procps-ng vim-minimal tmux net-tools htop tar jq npm openssl-devel perl rust cargo golang
 # only required for deployment script
 RUN npm install -g ts-node && npm install -g typescript
 
 ADD https://github.com/AaronKutch/go-opera/releases/download/onomy_release_8530dc13/opera /usr/bin/opera
+RUN chmod u+x /usr/bin/opera
 
 # the actual source code for this repo, this **only** includes checked in files!
 # this is a bit of a pain but it does speed things up a lot
