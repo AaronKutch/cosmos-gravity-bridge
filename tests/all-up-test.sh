@@ -77,7 +77,7 @@ else
 fi
 
 export NEON_EVM_IMAGE="neonlabsorg/evm_loader:975b32d2122f0a891dcb20a0ea858ecd24d3a9a3"
-export NEON_PROXY_IMAGE="neonlabsorg/proxy:596212c399dee75b0d2e6fcc6fb017a85c2fc2f8"
+export NEON_PROXY_IMAGE="neonlabsorg/proxy:v0.15.9"
 export NEON_FAUCET_IMAGE="neonlabsorg/faucet:v0.12.0"
 export USE_LOCAL_ARTIFACTS=${USE_LOCAL_ARTIFACTS:-0}
 export VOLUME_ARGS
