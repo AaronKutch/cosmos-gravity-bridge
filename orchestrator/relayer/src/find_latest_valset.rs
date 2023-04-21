@@ -45,24 +45,7 @@ pub async fn find_latest_valset(
 
         // we take only the first event if we find any at all.
         if !all_valset_events.is_empty() {
-
-            let mut latest = 0;
-            let mut latest_nonce = 0;
-            let mut i = 0;
-            for event in &all_valset_events {
-                match ValsetUpdatedEvent::from_log(event) {
-                    Ok(event) => {
-                        if event.valset_nonce > latest_nonce {
-                            latest_nonce = event.valset_nonce;
-                            latest = i;
-                        }
-                    }
-                    Err(e) => panic!(),
-                }
-                i += 1;
-            }
-
-            let event = &all_valset_events[latest];
+            let event = &all_valset_events[0];
             match ValsetUpdatedEvent::from_log(event) {
                 Ok(event) => {
                     let latest_eth_valset = Valset {
