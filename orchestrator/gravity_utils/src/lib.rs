@@ -47,7 +47,7 @@ pub const TEST_GAS_LIMIT: Uint256 = u256!(7_000_000_000_000);
 pub const TEST_INVALID_EVENTS_GAS_LIMIT: Uint256 = u256!(7_000_000_000_000);
 /// When debugging `BATCH_STRESS` or `REMOTE_STRESS` it may be useful to reduce this,
 /// note this has a minimum of 4 users because of assumptions the tests make
-pub const TESTS_BATCH_NUM_USERS: usize = 100;
+pub const TESTS_BATCH_NUM_USERS: usize = 32; // solana has a 64 address interaction limit
 /// This causes failures in INVALID_EVENTS if too large
 pub const TEST_ERC20_MAX_SIZE: usize = 3_000;
 
