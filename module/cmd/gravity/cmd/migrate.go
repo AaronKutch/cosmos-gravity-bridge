@@ -3,9 +3,10 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
-	v100 "github.com/cosmos/ibc-go/v2/modules/core/legacy/v100"
-	tmtypes "github.com/tendermint/tendermint/types"
 	"time"
+
+	v100 "github.com/cosmos/ibc-go/v4/modules/core/legacy/v100"
+	tmtypes "github.com/tendermint/tendermint/types"
 
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
